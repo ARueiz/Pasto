@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Pasto.Server.Application.Rooms;
 using Pasto.Server.Infrastructure.Persistence;
+using Pasto.Server.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,9 +13,17 @@ if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Set ConnectionStrings__Pasto before starting Pasto.Server.");
 }
 
-builder.Services.AddDbContext<PastoDbContext>(options => options.UseNpgsql(connectionString));
+// Factory 讓每次建房嘗試擁有自己的 context；也會註冊 scoped PastoDbContext 供後續 use case 使用。
+builder.Services.AddDbContextFactory<PastoDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddOptions<CreateRoomOptions>()
+    .Bind(builder.Configuration.GetSection("RoomCreation"))
+    .Validate(options => options.MaxCodeAttempts is >= 1 and <= 20, "MaxCodeAttempts must be between 1 and 20.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<IRoomSecrets, RoomSecrets>();
+builder.Services.AddScoped<IRoomCreationStore, RoomCreationStore>();
+builder.Services.AddScoped<CreateRoom>();
 
 var app = builder.Build();
-// S1-02 僅提供 host／持久層骨架，尚無產品 endpoint；所有路徑目前回 404。
+// S1-03 已可由 Application 建房，尚無產品 endpoint；所有路徑目前回 404。
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();

@@ -6,14 +6,15 @@
 
 ## 目前狀態
 
-**開發中，已建立後端 host／正式持久層骨架，尚無產品 API 或前端。**
+**開發中，已建立正式持久層與 Application 建房流程，尚無產品 API 或前端。**
 
 | 項目 | 狀態 |
 | --- | --- |
 | 需求、架構、ADR | 已定案 |
 | S1-01 PostgreSQL／EF Core 整合測試骨架 | 已完成（2 個 Creator 正反例） |
 | S1-02 正式持久層骨架 | 已完成（正式 Migration；共 6 個整合測試通過） |
-| S1-03 之後（API、前端、SignalR、清理、限流、壓測） | 尚未開始；前端方向待討論 |
+| S1-03 正式建房與 Owner／cascade | 已實作並驗證；全專案 24 個測試通過，已靜態審查，尚待提交 |
+| S1-04 之後（併發交易、期限、API、前端、SignalR 等） | 尚未開始；前端方向待討論 |
 
 階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
@@ -76,3 +77,5 @@ dotnet test Pasto.slnx --configuration Release --no-restore
 - [ADR 0002：六碼房碼與匿名參與者](docs/decisions/0002-room-code-and-anonymous-participants.md)
 - [ADR 0003：MVP 範圍收斂](docs/decisions/0003-mvp-scope-reduction.md)
 - [S1-01 入門導讀](docs/s1-01-dotnet-postgresql-guide.md)
+- [S1-02 完成報告與維護導讀](docs/s1-02-maintenance-report.md)
+- [S1-03 建房流程與驗證](docs/s1-03-room-creation.md)

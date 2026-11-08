@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 using Pasto.Server.Infrastructure.Persistence;
 
@@ -72,13 +73,24 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         }
     }
 
-    public PastoDbContext CreateContext()
+    public PastoDbContext CreateContext(params IInterceptor[] interceptors)
     {
         // All unqualified table names resolve only to this test's isolated schema.
         var options = new DbContextOptionsBuilder<PastoDbContext>()
             .UseNpgsql(connectionString)
+            .AddInterceptors(interceptors)
             .Options;
         return new PastoDbContext(options);
+    }
+
+    // 讓整合測試用真正式 Store；interceptor 僅由測試注入，不在產品內加入故障開關。
+    public IDbContextFactory<PastoDbContext> CreateContextFactory(params IInterceptor[] interceptors)
+        => new TestContextFactory(this, interceptors);
+
+    private sealed class TestContextFactory(PostgresTestDatabase database, IInterceptor[] interceptors)
+        : IDbContextFactory<PastoDbContext>
+    {
+        public PastoDbContext CreateDbContext() => database.CreateContext(interceptors);
     }
 
     public async ValueTask DisposeAsync()

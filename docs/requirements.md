@@ -1,6 +1,6 @@
 # Pasto Sprint 1 — 最終需求規格
 
-更新：2026-10-20（最終 Review）；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP 範圍（整份快照取代分頁、基本限流）。Q1～Q7 與 T1～T8 的方向已確認；限流、資源與效能的候選值仍須安全測試／壓測。產品功能尚未實作；已建立正式持久層骨架，進度見實作計畫。
+更新：2026-10-20（最終 Review）；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP 範圍（整份快照取代分頁、基本限流）。Q1～Q7 與 T1～T8 的方向已確認；限流、資源與效能的候選值仍須安全測試／壓測。已建立正式持久層與 Application 建房流程，尚無產品 API／UI；進度見實作計畫。
 
 現行依據：[architecture.md](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。[ADR 0001](decisions/0001-initial-architecture.md) 只保留歷史。執行順序見 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)。
 

@@ -1,6 +1,6 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-08，S1-02。測試引用正式 `Pasto.Server`，每個案例使用獨立 schema，由正式 Migration 建表。尚無產品 API、完整 CreateRoom、前端或 SignalR。
+更新：2026-11-09，S1-03。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom，尚無產品 API、前端或 SignalR。
 
 ## 1. 環境與相依
 
@@ -44,18 +44,20 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-預期 6 個通過、0 個失敗。未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+預期 24 個通過、0 個失敗（23 個真 DB 案例、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
-| SameRoomCreator_CommitsThroughStagedEfWrites | 正式 Migration 上分階段 EF 寫保留碼、Room、Participant，同交易提交後可讀回 |
-| CreatorFromAnotherRoom_IsRejectedAtCommitAndRollsBackNewRoom | 真實存在的跨房 Creator 在 commit 被 fk_rooms_creator／23503 拒絕，B 房三筆資料均回滾，A 房保留 |
+| CreatorIntegrityTests（3 例） | 正式 CreateRoom 成功、跨房 Creator／缺房主在 commit 被拒絕且回滾，原房保留 |
+| RoomCreationTests（11 例） | 已用碼／冷卻碼碰撞、重試上限、非房碼 unique 錯誤不重試、寫入後／commit 前失敗、取消、commit 後結果遺失、兩交易房碼競爭 |
+| OwnershipAndCascadeTests（5 例） | Owner 同房正反例、帶文字實際刪房 cascade／保留碼／他房保留、單刪 Creator／被引用保留碼拒絕 |
+| RoomSecretsTests（1 例） | 六碼格式、128-bit 原始隨機值的 Base64URL 格式與 SHA-256 編碼一致性，不以抽樣宣稱密碼學強度 |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
 | MigrationHistory_IsIsolatedPerTestSchema | 兩個 schema 各自建表／記 Migration；回退其中一個不影響另一個 |
 
-Creator 寫入 helper 仍是 S1-01 延續的測試 fixture，只替換成正式模型；S1-03 才交付正式 CreateRoom 與 Owner／cascade 的行為測試。catalog 定義檢查不等於這些行為已全部驗證。
+Creator 案例已改跑正式 CreateRoom／RoomCreationStore，移除原本的建房寫入 helper。`TestRoomCreation` 只組裝正式服務；故障／非法資料由測試 interceptor 注入，產品沒有測試專用開關。Owner／cascade 測試的文字資料準備仍為 fixture，正式新增文字流程在 S1-04 實作。
 
 ## 4. Migration 與 host 的操作
 
@@ -71,7 +73,7 @@ dotnet ef migrations script --project src/Pasto.Server --output src/Pasto.Server
 # dotnet ef database update --project src/Pasto.Server
 ```
 
-手動 update 使用連線預設 schema，與測試的 GUID schema 分開；測試不需要先跑 update。正式 host 也使用 `ConnectionStrings__Pasto`，啟動時不自動 Migrate。S1-02 尚無 endpoint，啟動後所有路徑為 404。
+手動 update 使用連線預設 schema，與測試的 GUID schema 分開；測試不需要先跑 update。正式 host 也使用 `ConnectionStrings__Pasto`，啟動時不自動 Migrate。S1-03 仍無 endpoint，啟動後所有路徑為 404。建房設定與編碼規則見 [S1-03 導讀](s1-03-room-creation.md)。
 
 EF 能追蹤的 CHECK／部分索引保留在 mapping 與 snapshot，初始 Migration 依 ADR 0003 以明確 SQL 建立；DEFERRABLE 不在 EF 模型內，日後任何重建這兩條 FK 的 Migration 都須手動保留並跑 catalog 測試。歷史 Migration 不引用目前 Domain 常數，避免規則變更影響舊 DDL。
 
@@ -85,11 +87,11 @@ EF 能追蹤的 CHECK／部分索引保留在 mapping 與 snapshot，初始 Migr
 
 若程序被強制終止可能遺留 schema。DBeaver 可連相同 DB，先確認名稱來源後再人工處理；正常完成看不到永久測試表是預期行為。
 
-本輪實測：Windows、SDK 10.0.402、runtime 10.0.13、Docker PostgreSQL 18.6，Release 六個案例通過。之前曾被 Windows Smart App Control 封鎖 DLL（0x800711C7）；環境調整後可正常執行，不是測試斷言失敗。
+S1-02 當時實測：Windows、SDK 10.0.402、runtime 10.0.13、Docker PostgreSQL 18.6，Release 六個案例通過。之前曾被 Windows Smart App Control 封鎖 DLL（0x800711C7）；環境調整後可正常執行，不是測試斷言失敗。
 
 ### S1-02 審查後驗證紀錄（2026-11-08）
 
-- 基準 commit：`211a2a6`；分支：`feature/s1-02-persistence`。結果對應本輪未提交的工作目錄，尚非已合併版本。
+- 測試當時基準 commit：`211a2a6`；分支：`feature/s1-02-persistence`。當時結果對應未提交的工作目錄；後續實作提交為 `6846558`，並經 PR #1 合併至 `00a9890`。提交前只額外移除 DbContext 檔尾空白行，無邏輯變更；本機確認 merge tree 與 `6846558` 相同。
 - `dotnet restore Pasto.slnx --locked-mode`：通過。
 - `dotnet build Pasto.slnx -c Release --no-restore`：通過，0 warning／0 error。
 - `dotnet format Pasto.slnx --no-restore --verify-no-changes`：通過。
@@ -98,8 +100,26 @@ EF 能追蹤的 CHECK／部分索引保留在 mapping 與 snapshot，初始 Migr
 - 原始結果保存在本機 `tests/Pasto.IntegrationTests/TestResults/s1-02-verified-run1.trx` 與 `s1-02-verified-run2.trx`；TestResults 已 ignore，不納入版本控制。
 - 擴充索引集合斷言時，首次漏列 `PK___EFMigrationsHistory`，造成 1 failed／5 passed；補齊後才取得上述兩輪通過結果。首次失敗紀錄保留於同目錄 `s1-02-review-run1.trx`。
 
-Claude 本輪僅做靜態審查；上述測試由實作方重跑，不宣稱為獨立測試驗證。完成實作／驗證不代表已 commit、merge 或完成整個 S1。
+Claude 本輪僅做靜態審查；上述測試由實作方重跑，不宣稱為獨立測試驗證。S1-02 現已 commit／merge，但整個 S1 尚未完成。維護導讀與合併紀錄見 [S1-02 報告](s1-02-maintenance-report.md)。
 
-尚未驗證：正式 CreateRoom、Owner／cascade 行為、完整失敗注入、同房併發、期限邊界、REST／UI／SignalR、安全與負載測試。這些依 S1-03 以後的計畫進行，不由目前六例推論已完成。
+### S1-03 驗證紀錄（2026-11-08）
+
+- 基準 `00a9890`；分支 `feature/s1-03-create-room`，尚未提交。沿用 schema，沒有新增 Migration、套件或基礎設施。
+- Release Build：0 warning／0 error；格式檢查通過。最終完整測試 23 passed／0 failed／0 skipped；測試前後均為 0 個測試 schema。
+- 鎖定版本還原通過；首次在沙箱內查 NuGet 弱點資料遇到 NU1900（網路受限），取得連線權限後重跑成功，沒有關閉 audit 或修改套件版本。
+- 首次 Build 遇到 xUnit2031（Assert.Single 前不應先 Where），已改用 predicate overload，沒有降低斷言。
+- 首次 DB 測試 22 passed／1 failed：跨房 Creator interceptor 誤改 entity，導致新房主 ID 跟著變成既有 ID，先觸發 `PK_room_participants`。改為在同交易用參數化 SQL 只污染已寫入 Room 的 Creator 欄位，保留 FK 啟用；最終驗證為 commit 的 `fk_rooms_creator`／23503。
+- 本機 TRX：`tests/Pasto.IntegrationTests/TestResults/s1-03-initial.trx`（首次失敗）、`s1-03-verified.trx`（修正後通過），皆受 ignore 規則排除。
+- 提交後例外的案例會保留已 commit 的三筆資料，並確認沒有自動重試；這個結果不應被說成 rollback 失敗。
+
+### S1-03 審查後補驗證（2026-11-09）
+
+- Claude 靜態審查無 P0～P2；核對既有 TRX，未獨立執行測試。
+- F1 保留 commit 的 CancellationToken，在程式註解與導讀明確記錄結果不確定語意；新增已提交後收到取消例外的測試，不宣稱模擬真實網路競爭。
+- Release Build（0 warning／0 error）、格式檢查通過；完整測試 24 passed／0 failed／0 skipped；測試前後均為 0 個測試 schema。
+- TRX：`tests/Pasto.IntegrationTests/TestResults/s1-03-review-20261109.trx`，保留先前 23 例的紀錄。
+- F2 尚無 SQL 往返／效能量測，保留預設 savepoint，延至 S8 評估。Program.cs 的 DI／ValidateOnStart 與 HTTP 取消處理測試列入 S2。
+
+尚未驗證：新增／刪除／關房的正式交易、文字容量競爭與計數一致性、期限邊界、REST／UI／SignalR、授權與完整安全／負載測試。S1-03 的房碼碰撞競爭不等於 S1-04 的文字併發已完成。
 
 S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其中舊 DDL／mapping 不是現行實作。

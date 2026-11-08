@@ -1,6 +1,6 @@
 # Pasto — Sprint 1 分階段實作計畫
 
-日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1-01、S1-02 已完成；S1-03 及後續尚未開始**（2026-11-08）。已有正式 host／持久層骨架、初始 Migration 與六個整合測試，尚無產品 endpoint；實測與執行方式見 [testing.md](testing.md)。先前的 UI Prototype 已移除，S4 前端待重新討論。
+日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1-01、S1-02 已合併；S1-03 已實作與驗證，已靜態審查，尚待提交；S1-04 及後續尚未開始**（2026-11-09）。已有正式 host／持久層、初始 Migration 與 Application 建房流程，全專案 24 個測試通過，尚無產品 endpoint；實測與執行方式見 [testing.md](testing.md)。先前的 UI Prototype 已移除，S4 前端待重新討論。
 
 依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。ADR 0001 僅供歷史比較，不是實作來源。
 
@@ -22,7 +22,7 @@ S1-01 依核准建立最小必要測試專案與相依，沿用既有 DB；不�
 | --- | --- | --- |
 | S1-01 最小完整性測試骨架（已完成） | 最小 .NET 10 測試／持久層範圍、固定 PostgreSQL／EF provider 版本、可拋棄測試 DB／schema、四表測試 DDL／mapping、執行說明 | 真 PostgreSQL 可重跑；不是 InMemory／SQLite；不連共享／正式 DB；測試失敗確實使指令失敗 |
 | S1-02 正式持久層骨架（已完成） | `src/Pasto.Server`（Api／Application／Domain／Infrastructure 資料夾）、root `.slnx`、本機 PostgreSQL `compose.yaml`、正式 DbContext 與初始 Migration（DEFERRABLE 複合 FK、CHECK、部分索引以 `migrationBuilder.Sql()` 加入）；測試專案改引用正式專案 | 既有兩個 Creator 案例改跑 Migration 建出的 schema 並通過；整合測試檢查 `pg_constraint` 的 deferred／cascade 定義與 S1-01 相同；移除測試用 `schema.sql` 與 `RoomTestDbContext` |
-| S1-03 建房與 Owner／cascade | 正式 CreateRoom 交易（保留碼 → Room → 房主，分階段 EF＋同一 DbTransaction、Code 碰撞有界重試）與 Owner／cascade 測試 | 同房有效建立 commit；跨房 Owner／Creator、缺房主及中途失敗均不留下部分資料；刪 Room 清 Participant／items，保留碼仍在 |
+| S1-03 建房與 Owner／cascade（已實作／驗證／靜態審查，待提交） | 正式 CreateRoom 交易（保留碼 → Room → 房主，分階段 EF＋同一 DbTransaction、Code 碰撞有界重試）與 Owner／cascade 測試 | 同房有效建立 commit；跨房 Owner／Creator、缺房主及中途失敗均不留下部分資料；刪 Room 清 Participant／items，保留碼仍在 |
 | S1-04 併發交易核心 | 正式的新增／刪除／關房交易路徑與整合測試，分成新增、刪除、關房三個小 patch | 299 筆併發新增僅一個成功；刪同筆只扣一次；Owner 權限正確；關房／新增／刪除同鎖序，無負計數／額外 Version，TotalBytes 等於實際統計且不作容量拒絕 |
 | S1-05 期限邊界 | 到期邊界、等待鎖後到期、DeletedAt 的測試 | 過期／DeletedAt 在鎖後依 DB 當下時間重驗；原子 rollback、FK deferred commit／違約失敗均符合預期。保留碼回收的測試隨 S6 Worker 一起做 |
 
@@ -53,6 +53,8 @@ S1-01 已採 EF Core／PostgreSQL provider、xUnit 與 VSTest runner，固定版
 - 建房回應／QR 用的 URL 不帶 Credential；/me 恢復不新增身分；無效 Credential 不取得他房身分。
 - 一般人不能關房，房主關房後讀寫／加入拒絕；DB／通知暫時未接完整時不顯示假成功。
 - 建房／加入超過限流回 429 與 Retry-After；不觸碰使用者既有或正式資料庫。
+
+S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／非法 MaxCodeAttempts 與 ValidateOnStart，以及 commit 期間取消的結果不確定語意；不得只複製註冊程式到測試。
 
 ## 4. S3：文字 CRUD、容量及整份快照列表
 
@@ -132,8 +134,8 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 10. 下一個實作任務與完成回報
 
-S1-01、S1-02 已完成。正式 DbContext、Migration、Solution、Compose 與工具鏈已就緒；六個整合測試通過，舊測試 DDL／mapping 已移除。**下一個任務：S1-03「建房與 Owner／cascade」**，之後為 S1-04 併發交易核心、S1-05 期限邊界。
+S1-01、S1-02 已合併；S1-03 正式建房、碰撞重試、Creator／Owner／cascade 與失敗注入已實作，24 個測試通過，已靜態審查，尚待提交。**下一個開發階段：S1-04「併發交易核心」**，之後為 S1-05 期限邊界。開始每個後續 S1 小階段前先建立獨立功能分支。
 
-每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完成 S1-01／S1-02 持久層骨架與六個整合案例，不代表 S1 全階段或完整 MVP 已完成。
+每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前 S1-03 已完成實作驗證，全專案 24 個測試通過，不代表 S1 全階段或完整 MVP 已完成。
 
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。
