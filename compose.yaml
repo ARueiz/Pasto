@@ -1,0 +1,37 @@
+# 僅供本機開發／整合測試，不是正式環境部署設定。
+# 先複製 .env.example 為 .env，填入自己的測試密碼，再執行 docker compose up -d --wait。
+name: pasto
+
+services:
+  postgres:
+    # 沿用 S1-01 驗證的版本，避免 latest 隨時間改變。
+    image: postgres:18.6
+    environment:
+      # 專用測試 DB 必須以 _test 結尾，符合現有測試的防誤連檢查。
+      # 此角色由官方映像建立為 superuser，僅用於隔離的本機測試。
+      POSTGRES_DB: pasto_test
+      POSTGRES_USER: pasto_test
+      # 密碼不寫進版本控制；未設定或空白時，Compose 直接拒絕啟動。
+      POSTGRES_PASSWORD: ${PASTO_POSTGRES_PASSWORD:?請在 .env 設定 PASTO_POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      # 僅綁定本機 loopback，不開放區域網路存取；若已被占用，先確認既有 DB。
+      - "127.0.0.1:55432:5432"
+    volumes:
+      # PostgreSQL 18 官方映像的掛載點是 /var/lib/postgresql。
+      # Named volume 會跨容器重建保留資料；docker compose down 不會刪除此資料。
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      # $$ 保留給容器內 shell 展開，避免 Compose 誤讀主機的環境變數。
+      # 指定 TCP，等正式 server 接受連線；此檢查不驗證密碼或產品 schema。
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  # 測試自行建立／清理獨立 schema；這裡不掛載測試 DDL 或自動執行 Migration。
+  # 初始化後修改 .env 的密碼不會更新既有 DB 密碼，需以 SQL 明確變更。
+  # docker compose down --volumes 會刪除整個本機測試資料，請勿當成一般停止指令。
+  postgres_data:
