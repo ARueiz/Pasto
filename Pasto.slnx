@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pasto.Server/Pasto.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pasto.IntegrationTests/Pasto.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

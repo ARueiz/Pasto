@@ -1,6 +1,6 @@
-﻿# Pasto Sprint 1 — 最終架構與實作前修訂
+# Pasto Sprint 1 — 最終架構與實作前修訂
 
-更新：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP（正式持久層優先、整份快照、基本限流）。Q1～Q7、T1～T8 方向已確認；限流／效能設定須實測，產品程式尚未實作。
+更新：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP（正式持久層優先、整份快照、基本限流）。Q1～Q7、T1～T8 方向已確認；限流／效能設定須實測，產品功能尚未實作（持久層進度見文末）。
 
 規則以 [requirements.md](requirements.md) 為準；現行決策見 [ADR 0002](decisions/0002-room-code-and-anonymous-participants.md) 與 [ADR 0003](decisions/0003-mvp-scope-reduction.md)，[ADR 0001](decisions/0001-initial-architecture.md) 只保留歷史。執行順序見 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)。
 
@@ -232,4 +232,4 @@ HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻�
 
 之後依需求 AC-01～AC-15 測安全與 1,000 連線、熱房、同 NAT、300 筆×8 KiB、重連風暴／補償流量，量測方案 A 整份快照的查詢／傳輸放大及熱房收斂。硬體、候選 p95、每秒 20 次平衡新增／刪除仍待實測。達瓶頸先調查詢、限制、通知合併及單實例資源；需要時才另評估局部同步、多實例 SignalR backplane／託管服務，不重採 ADR 0001 的共同權限模型。
 
-目前只有 S1-01 整合測試骨架；尚未建立產品專案、正式 Migration，也未執行應用程式測試／壓測。
+2026-11-08：S1-02 已建立正式 host／DbContext／初始 Migration，六個 PostgreSQL 整合測試通過；尚無正式 CreateRoom、API、UI 或壓測。

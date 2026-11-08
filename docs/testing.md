@@ -1,121 +1,105 @@
-# Pasto — S1-01 PostgreSQL 整合測試
+# Pasto — PostgreSQL 整合測試與 Migration
 
-日期：2026-10-20。S1-01 只建立測試骨架及兩個 Creator 正反例；沒有產品 API、前端、正式 Migration 或完整 CreateRoom use case。
+更新：2026-11-08，S1-02。測試引用正式 `Pasto.Server`，每個案例使用獨立 schema，由正式 Migration 建表。尚無產品 API、完整 CreateRoom、前端或 SignalR。
 
-第一次接觸 .NET／PostgreSQL／EF Core，請先讀 [S1-01 入門導讀](s1-01-dotnet-postgresql-guide.md)：包含建立指令、專案結構、完整欄位用途、EF／交易流程與後續 API 驗證方式。本文件保留為快速操作與實測紀錄。
+## 1. 環境與相依
 
-## 1. 已建立的範圍
-
-- 一個 .NET 10 測試專案：[Pasto.IntegrationTests.csproj](../tests/Pasto.IntegrationTests/Pasto.IntegrationTests.csproj)。
-- 四表測試 DDL：[schema.sql](../tests/Pasto.IntegrationTests/Persistence/schema.sql)。
-- 四表／關聯的 EF mapping：[RoomTestDbContext.cs](../tests/Pasto.IntegrationTests/Persistence/RoomTestDbContext.cs)。
-- 每個案例的獨立 schema 與清理：[PostgresTestDatabase.cs](../tests/Pasto.IntegrationTests/PostgresTestDatabase.cs)。
-- Creator 正反例：[CreatorIntegrityTests.cs](../tests/Pasto.IntegrationTests/CreatorIntegrityTests.cs)。
-
-測試內的 Record／mapping 與 fixture 插入方法用於驗證候選模型，不是正式 Domain／Application。FK 的 DEFERRABLE／CHECK／部分索引以測試 SQL 建立，不宣稱目前 EF mapping 可直接產出完全相同的 Migration。S1-02 再擴充驗證與決定可重用的正式寫入方式。
-
-## 2. 環境與固定版本
-
-| 項目 | 本次版本 |
+| 項目 | 固定版本／用途 |
 | --- | --- |
-| .NET SDK | 10.0.402，root global.json 允許同 feature band 的更新 patch |
-| PostgreSQL | 18.6，本次從真 DB 取得的 server version |
-| Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.3，直接相依 |
-| EF Core／Relational | 10.0.4，由 provider 相依並固定於 packages.lock.json |
-| Npgsql | 10.0.3，由 provider 相依並固定於 lock file |
-| Microsoft.NET.Test.Sdk | 18.0.1 |
-| xunit | 2.9.3 |
-| xunit.runner.visualstudio | 3.1.5 |
+| .NET SDK | 10.0.402，見 root global.json |
+| PostgreSQL | 18.6，見 compose.yaml |
+| Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.3，正式專案的 provider |
+| EF Core／Relational／Design | 10.0.4，Design 為工具相依且 PrivateAssets=all |
+| dotnet-ef | 10.0.4，本機工具，見 dotnet-tools.json |
+| Microsoft.NET.Test.Sdk／xunit／runner | 18.0.1／2.9.3／3.1.5 |
 
-provider 10.0.3 使用 EF Core 10 系列；套件版本依 NuGet 相依資訊選定，整體組合已實際編譯與測試。[Provider 套件](https://www.nuget.org/packages/Npgsql.EntityFrameworkCore.PostgreSQL/10.0.3)、[Test SDK](https://www.nuget.org/packages/Microsoft.NET.Test.Sdk/18.0.1)、[xUnit](https://www.nuget.org/packages/xunit/2.9.3)、[Runner](https://www.nuget.org/packages/xunit.runner.visualstudio/3.1.5)
+兩個專案都有 `packages.lock.json`；測試透過 ProjectReference 使用正式 provider，不再維護測試用 DbContext 或 DDL。未新增 Testcontainers、SQLite、InMemory 或通用 Repository。
 
-xUnit 負責案例與斷言，VSTest runner 提供 dotnet test／IDE 整合；沒有加入 Testcontainers、EF Design、InMemory、SQLite 或額外斷言套件。直接及間接相依均以 packages.lock.json 鎖定，依賴更新應明確 Review。
+## 2. 啟動本機 PostgreSQL
 
-## 3. 資料庫準備
-
-可以沿用既有的本機專用 PostgreSQL，或使用根目錄的 [compose.yaml](../compose.yaml)。Compose 僅建立測試資料庫，不建立產品資料表；目前測試仍自行管理獨立 schema。
-
-首次使用 Compose（在專案根目錄執行）：
+在 repo 根目錄執行。若已有 `.env` 或資料庫，直接沿用，勿覆蓋或重建資料。
 
 ```powershell
 Copy-Item .env.example .env
-# 編輯 .env，將 PASTO_POSTGRES_PASSWORD 填入自己的本機測試密碼。
+# 編輯 .env，填入自己的 PASTO_POSTGRES_PASSWORD。
 docker compose config --quiet
 docker compose up -d --wait
 docker compose ps
 ```
 
-若已有 `.env`，請直接編輯，不要覆蓋。資料庫為 `127.0.0.1:55432`／`pasto_test`，使用者為 `pasto_test`，密碼使用 `.env` 所填值。啟動前確認 55432 沒有被既有 DB 占用。若終端機找不到 `docker`，請重開終端機；仍找不到時確認 Docker CLI 安裝路徑是否已加入 PATH。
+主機 `127.0.0.1`、port `55432`、DB `pasto_test`、使用者 `pasto_test`。Docker CLI 找不到時，重開終端機或確認 PATH。Compose 健康檢查僅確認 server 接受連線，不代表密碼／Migration／測試已驗證。
 
-一般停止用 `docker compose down`，named volume 仍保留資料。`docker compose down --volumes` 會刪除整個測試資料庫，不用於一般停止。官方映像只在空資料目錄初始化帳密，修改 `.env` 不會變更既有資料庫密碼。Compose 健康檢查僅確認 server 可接受連線，不代表整合測試已通過。
+一般停止用 `docker compose down`，named volume 保留資料。`docker compose down --volumes` 會刪除整個 DB，不當作一般停止指令。初始化後修改 `.env` 不會改既有 DB 密碼。
 
-以下保留先前 `docker run` 的替代方式；請與 Compose 擇一，不要同時占用相同連接埠：
+## 3. 建置與測試
 
-```powershell
-docker run --name pasto-postgres-test --rm -e POSTGRES_USER=pasto_test -e POSTGRES_PASSWORD=pasto_test_local -e POSTGRES_DB=pasto_test -p 127.0.0.1:55432:5432 -d postgres:18.6
-docker exec pasto-postgres-test pg_isready -U pasto_test -d pasto_test
-```
-
-此密碼只是前面本機示範環境的測試值；改過設定時請使用自己的測試資料庫連線資訊。這個 --rm 容器是可拋棄資料環境，停止後匿名資料 volume 隨容器移除，不用於正式資料。[PostgreSQL image](https://hub.docker.com/_/postgres)
-
-測試角色需能在專用 DB 建立／刪除 schema 及表。測試會拒絕非 loopback Host，且 Database 必須以 `_test` 結尾；只接受 `127.0.0.1`、`localhost` 或 `::1`。這是避免誤連的本機保護，執行者仍須確認它是專用測試 DB。
-
-## 4. 執行方式（PowerShell，專案根目錄）
-
-連線只從程序環境變數讀取，不寫入 repo 或一般測試輸出。Compose 的 `.env` 不會自動設定 PowerShell 的測試連線變數；請將下列密碼替換為實際值（使用 Compose 時與 `.env` 一致）：
+`.env` 不會自動匯入 PowerShell 或 ASP.NET Core。請另外設定測試連線，使用與 DB 相同的密碼，不將實際連線字串存入 repo 或日誌。
 
 ```powershell
 $env:PASTO_TEST_CONNECTION_STRING = 'Host=127.0.0.1;Port=55432;Database=pasto_test;Username=pasto_test;Password=<本機測試密碼>'
-dotnet restore tests/Pasto.IntegrationTests/Pasto.IntegrationTests.csproj --locked-mode
-dotnet test tests/Pasto.IntegrationTests/Pasto.IntegrationTests.csproj --configuration Release --no-restore --logger 'console;verbosity=normal'
+dotnet tool restore
+dotnet restore Pasto.slnx --locked-mode
+dotnet build Pasto.slnx --configuration Release --no-restore
+dotnet test Pasto.slnx --configuration Release --no-build --no-restore
+dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-預期為 2 個通過、0 個失敗，指令 exit code 為 0。未設定連線、DB 未啟動、帳密錯誤或 SQL／斷言錯誤會失敗，不會 skip 或改用記憶體 DB。正常日誌不輸出連線字串；若需要 server version／schema 名稱，可將 logger 改成 `console;verbosity=detailed`。
+預期 6 個通過、0 個失敗。未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
-程式格式檢查：
+| 案例 | 驗證內容 |
+| --- | --- |
+| SameRoomCreator_CommitsThroughStagedEfWrites | 正式 Migration 上分階段 EF 寫保留碼、Room、Participant，同交易提交後可讀回 |
+| CreatorFromAnotherRoom_IsRejectedAtCommitAndRollsBackNewRoom | 真實存在的跨房 Creator 在 commit 被 fk_rooms_creator／23503 拒絕，B 房三筆資料均回滾，A 房保留 |
+| Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
+| Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
+| Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
+| MigrationHistory_IsIsolatedPerTestSchema | 兩個 schema 各自建表／記 Migration；回退其中一個不影響另一個 |
+
+Creator 寫入 helper 仍是 S1-01 延續的測試 fixture，只替換成正式模型；S1-03 才交付正式 CreateRoom 與 Owner／cascade 的行為測試。catalog 定義檢查不等於這些行為已全部驗證。
+
+## 4. Migration 與 host 的操作
+
+正式模型：[PastoDbContext](../src/Pasto.Server/Infrastructure/Persistence/PastoDbContext.cs)。初始 Migration 與 snapshot 位於同層的 `Migrations/`。
+
+工具使用獨立 design-time factory，不啟動 Web host。連線必須明確指定；單純產生 Migration／SQL script 不會連 DB，`database update` 才會變更指定 DB。不要把共用／正式 DB 當練習目標。
 
 ```powershell
-dotnet format tests/Pasto.IntegrationTests/Pasto.IntegrationTests.csproj --no-restore --verify-no-changes
+$env:ConnectionStrings__Pasto = $env:PASTO_TEST_CONNECTION_STRING
+dotnet ef migrations has-pending-model-changes --project src/Pasto.Server
+dotnet ef migrations script --project src/Pasto.Server --output src/Pasto.Server/obj/migration.sql
+# 確認是專用目標 DB 並審查 SQL 後，才手動執行：
+# dotnet ef database update --project src/Pasto.Server
 ```
 
-沒有 root solution，請使用上面的專案路徑；本階段沒有前端 Lint 或產品 Build 指令。
+手動 update 使用連線預設 schema，與測試的 GUID schema 分開；測試不需要先跑 update。正式 host 也使用 `ConnectionStrings__Pasto`，啟動時不自動 Migrate。S1-02 尚無 endpoint，啟動後所有路徑為 404。
 
-## 5. 兩個案例如何驗證
+EF 能追蹤的 CHECK／部分索引保留在 mapping 與 snapshot，初始 Migration 依 ADR 0003 以明確 SQL 建立；DEFERRABLE 不在 EF 模型內，日後任何重建這兩條 FK 的 Migration 都須手動保留並跑 catalog 測試。歷史 Migration 不引用目前 Domain 常數，避免規則變更影響舊 DDL。
 
-| 案例 | 操作 | 成功條件 |
-| --- | --- | --- |
-| SameRoomCreator_CommitsThroughStagedEfWrites | 同一 transaction：先 EF 寫保留碼，再寫 Room，最後寫同房 Participant，各步 SaveChanges | commit 成功；新 DbContext 可讀回 Room／Creator／保留碼且關聯正確，5 小時／24 小時 fixture 時間一致 |
-| CreatorFromAnotherRoom_IsRejectedAtCommitAndRollsBackNewRoom | 先成功建 A 房及其房主；B 房的 Creator 指向 A 的房主，B 仍建立自己的 Participant；逐步 SaveChanges 後嘗試 commit | DB 回 SQLSTATE 23503、ConstraintName=fk_rooms_creator；B Room／Participant／保留碼全回滾，A 房及房主仍存在 |
+相較 S1-01，EF 依 Creator 複合 FK 慣例額外建立 `IX_rooms_id_creator_participant_id (id, creator_participant_id)`。本階段刻意保留，不改變外鍵保證；因 `id` 已是 PK，這個索引的查詢效益可能有限。測試固定四張產品表的 13 個索引，加上 Migration history 的 PK，共 14 個索引名稱，後續增刪須明確審查。產生的 `obj/migration.sql` 已受既有 ignore 規則排除，只供檢閱，正式來源仍為 Migration。
 
-反例的 Participant 真實存在，所以測到的是「屬於不同房間」的拒絕，不只是不存在的 ID。SaveChanges 先成功、commit 才拒絕，也驗證到延後 FK 檢查的路徑。這次只證明該分階段 fixture 可行，沒有證明把整個循環 graph 一次 SaveChanges 就能成功。
+工具行為參考：[EF design-time factory](https://learn.microsoft.com/en-us/ef/core/cli/dbcontext-creation)、[自訂 Migration](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/managing)。
 
-缺少連線的失敗行為也已手動反向確認：清掉 PASTO_TEST_CONNECTION_STRING 後執行正例，dotnet test 回 exit code 1，錯誤為明確的設定提示。這是刻意驗證防呆，不是被忽略的正常測試失敗。
+## 5. 隔離、清理與實測界線
 
-## 6. Schema 隔離與 DBeaver
+每例 `pasto_it_<32位GUID>`，search_path 只指向自身 schema，包含 `__EFMigrationsHistory`。先建 schema，再由 Migrator 管理交易；初始化失敗會清自己的 schema，正常結束由 await using 清理。不用 EnsureCreated／EnsureDeleted、不 DROP DATABASE、不清 public，也不掃刪其他測試遺留 schema。
 
-每個案例產生 `pasto_it_<32位GUID>`，connection search_path 只指該 schema；DDL、EF 寫入與驗證皆使用它。不同案例可獨立執行，不共用測試資料。schema 建立與 DDL 在同交易，初始化失敗就回滾。
+若程序被強制終止可能遺留 schema。DBeaver 可連相同 DB，先確認名稱來源後再人工處理；正常完成看不到永久測試表是預期行為。
 
-案例結束由 await using 清除自己產生的 schema；不呼叫 EnsureCreated／EnsureDeleted、不清 public、不 DROP DATABASE。資料保護不依賴其他人的表名。請勿在自動化案例執行中手動改該 schema 的資料。
+本輪實測：Windows、SDK 10.0.402、runtime 10.0.13、Docker PostgreSQL 18.6，Release 六個案例通過。之前曾被 Windows Smart App Control 封鎖 DLL（0x800711C7）；環境調整後可正常執行，不是測試斷言失敗。
 
-DBeaver 仍可連 `127.0.0.1:55432`／pasto_test，執行：
+### S1-02 審查後驗證紀錄（2026-11-08）
 
-```sql
-SELECT schema_name
-FROM information_schema.schemata
-WHERE schema_name ~ '^pasto_it_[0-9a-f]{32}$'
-ORDER BY schema_name;
-```
+- 基準 commit：`211a2a6`；分支：`feature/s1-02-persistence`。結果對應本輪未提交的工作目錄，尚非已合併版本。
+- `dotnet restore Pasto.slnx --locked-mode`：通過。
+- `dotnet build Pasto.slnx -c Release --no-restore`：通過，0 warning／0 error。
+- `dotnet format Pasto.slnx --no-restore --verify-no-changes`：通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore`：連續兩輪各 6 passed／0 failed／0 skipped，維持 xUnit 預設的跨 class 並行。
+- 測試前後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：皆為 0 個 schema，沒有新增殘留。
+- 原始結果保存在本機 `tests/Pasto.IntegrationTests/TestResults/s1-02-verified-run1.trx` 與 `s1-02-verified-run2.trx`；TestResults 已 ignore，不納入版本控制。
+- 擴充索引集合斷言時，首次漏列 `PK___EFMigrationsHistory`，造成 1 failed／5 passed；補齊後才取得上述兩輪通過結果。首次失敗紀錄保留於同目錄 `s1-02-review-run1.trx`。
 
-正常完成後應沒有這次留下的 schema，所以看不到永久測試表是預期結果。若要學習觀察表／約束，可 debug 單一案例，在 CreateAsync 完成後設中斷點，再於 DBeaver refresh Schemas；繼續執行後會清掉。程序被強制終止可能遺留 schema，確認確為中止測試產生的名稱後再人工清理，不自動掃刪其他 schema。
+Claude 本輪僅做靜態審查；上述測試由實作方重跑，不宣稱為獨立測試驗證。完成實作／驗證不代表已 commit、merge 或完成整個 S1。
 
-## 7. 本次實測紀錄與界線
+尚未驗證：正式 CreateRoom、Owner／cascade 行為、完整失敗注入、同房併發、期限邊界、REST／UI／SignalR、安全與負載測試。這些依 S1-03 以後的計畫進行，不由目前六例推論已完成。
 
-- 環境：.NET SDK 10.0.402、測試 runtime 10.0.13、PostgreSQL 18.6，沿用已啟動的本機 DB。
-- Debug 整合測試：2／2 通過。
-- Release 整合測試：2／2 通過（含 constraint mapping 名稱更新後重跑）。
-- dotnet format --verify-no-changes：通過。
-- 缺少連線的控制實驗：dotnet test 如預期回 exit code 1。
-
-本次執行環境找不到 Docker CLI，沒有另外建立／重啟容器；整合測試直接連既有的 PostgreSQL。套件還原初次因使用者 .dotnet 快取權限失敗，取得執行權限後已成功還原。
-
-尚未驗證：Owner 反例、cascade 正反例、完整失敗注入、一次 tracked graph 寫入、容量／並行／鎖、到期邊界、效能／1,000 連線、REST／UI／SignalR。這些屬 S1-02 以後，不能由本次兩個案例推論已通過。
+S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其中舊 DDL／mapping 不是現行實作。

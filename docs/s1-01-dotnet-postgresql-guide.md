@@ -1,8 +1,10 @@
 ﻿# Pasto S1-01 入門導讀：從建立專案到理解 PostgreSQL、EF Core 與驗證
 
-日期：2026-10-20。對象：剛接觸 .NET／PostgreSQL／EF Core 的開發者。本文件依目前程式碼說明，不要求你先熟悉 ASP.NET Core。
+日期：2026-10-20。對象：剛接觸 .NET／PostgreSQL／EF Core 的開發者。本文件保留 S1-01 當時的程式與建立過程，不要求你先熟悉 ASP.NET Core。
 
-**目前已完成的是資料庫整合測試專案，只有兩個 Creator 測試；API／前端／SignalR 尚未實作。** 文中的 API 章節是現行設計的導讀，不能現在直接發 HTTP 請求執行。
+> 2026-11-08：S1-02 已將下文的測試用 `schema.sql`／`RoomTestDbContext` 移除，改成 `src/Pasto.Server` 的正式模型與 Migration，共六個測試。下文的檔案結構與程式片段僅供歷史教學；現行可執行指令與檔案位置以 [testing.md](testing.md) 為準。舊版檔案可由 Git commit `211a2a6` 查閱。
+
+**S1-01 當時完成的是資料庫整合測試專案，只有兩個 Creator 測試；API／前端／SignalR 尚未實作。** 文中的 API 章節是設計導讀，不能直接發 HTTP 請求執行。
 
 快速操作見 [testing.md](testing.md)；正式規則見 [requirements.md](requirements.md)，架構見 [architecture.md](architecture.md)。學習順序建議：先跑第 2 節 → 看第 4、5 節 → 追第 6、7 節程式 → 再讀 API 與後續驗證。
 
@@ -204,7 +206,7 @@ PostgresTestDatabase 設定 search_path，讓未加 schema 前綴的 `rooms` 指
 
 ## 5. 四張表與每個欄位的用途
 
-以下完全對照目前 [schema.sql](../tests/Pasto.IntegrationTests/Persistence/schema.sql)。欄位是 snake_case，C# 屬性是 PascalCase，由 EF mapping 對應。
+以下對照 S1-01 的 `schema.sql`（歷史版本見 commit `211a2a6` 的 `tests/Pasto.IntegrationTests/Persistence/schema.sql`）。欄位是 snake_case，C# 屬性是 PascalCase，由 EF mapping 對應。
 
 ### 5.1 型別與約束先讀懂
 
@@ -310,7 +312,7 @@ DEFERRABLE 是可以延後檢查，INITIALLY DEFERRED 是本交易預設到 comm
 
 ### 6.1 DbContext／DbSet／mapping
 
-[RoomTestDbContext.cs](../tests/Pasto.IntegrationTests/Persistence/RoomTestDbContext.cs) 讓 EF 知道 C# 類別與 DB 表的關係。例如：
+S1-01 的 `RoomTestDbContext.cs`（歷史版本見 commit `211a2a6` 的 `tests/Pasto.IntegrationTests/Persistence/RoomTestDbContext.cs`）讓 EF 知道 C# 類別與 DB 表的關係。例如：
 
 ```csharp
 room.ToTable("rooms");

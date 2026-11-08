@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using Pasto.IntegrationTests.Persistence;
+using Pasto.Server.Infrastructure.Persistence;
 
 namespace Pasto.IntegrationTests;
 
@@ -45,26 +45,40 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         await using var connection = new NpgsqlConnection(database.connectionString);
         await connection.OpenAsync();
         database.ServerVersion = connection.PostgreSqlVersion.ToString();
-        await using var transaction = await connection.BeginTransactionAsync();
-        // schemaName is generated internally from a fixed prefix and a GUID, never user input.
+        // schema 名稱僅由固定前綴與 GUID 產生，不接受外部輸入。
+        // 先建立隔離空間，再讓正式 Migrator 管理自己的交易與 migration lock。
         await using var create = new NpgsqlCommand(
-            $"CREATE SCHEMA \"{database.schemaName}\"", connection, transaction);
+            $"CREATE SCHEMA \"{database.schemaName}\"", connection);
         await create.ExecuteNonQueryAsync();
-        var sql = await File.ReadAllTextAsync(
-            Path.Combine(AppContext.BaseDirectory, "Persistence", "schema.sql"));
-        await using var setup = new NpgsqlCommand(sql, connection, transaction);
-        await setup.ExecuteNonQueryAsync();
-        await transaction.CommitAsync();
-        return database;
+        try
+        {
+            await using var context = database.CreateContext();
+            await context.Database.MigrateAsync();
+            return database;
+        }
+        catch (Exception initializationError)
+        {
+            // Migrate 失敗時，await using 尚未接管 database，必須在這裡清自己的 schema。
+            try
+            {
+                await database.DisposeAsync();
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException("Migration and test schema cleanup failed.", initializationError, cleanupError);
+            }
+
+            throw;
+        }
     }
 
-    public RoomTestDbContext CreateContext()
+    public PastoDbContext CreateContext()
     {
         // All unqualified table names resolve only to this test's isolated schema.
-        var options = new DbContextOptionsBuilder<RoomTestDbContext>()
+        var options = new DbContextOptionsBuilder<PastoDbContext>()
             .UseNpgsql(connectionString)
             .Options;
-        return new RoomTestDbContext(options);
+        return new PastoDbContext(options);
     }
 
     public async ValueTask DisposeAsync()

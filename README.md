@@ -6,13 +6,13 @@
 
 ## 目前狀態
 
-**開發中，尚無可執行的產品程式。**
+**開發中，已建立後端 host／正式持久層骨架，尚無產品 API 或前端。**
 
 | 項目 | 狀態 |
 | --- | --- |
 | 需求、架構、ADR | 已定案 |
 | S1-01 PostgreSQL／EF Core 整合測試骨架 | 已完成（2 個 Creator 正反例） |
-| S1-02 正式持久層骨架（下一步） | 尚未開始 |
+| S1-02 正式持久層骨架 | 已完成（正式 Migration；共 6 個整合測試通過） |
 | S1-03 之後（API、前端、SignalR、清理、限流、壓測） | 尚未開始；前端方向待討論 |
 
 階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
@@ -41,6 +41,10 @@
 Pasto/
 ├─ AGENTS.md                    AI Agent 協作規範
 ├─ global.json                  固定 .NET SDK 版本
+├─ Pasto.slnx                   後端與測試的 Solution
+├─ dotnet-tools.json            本機 dotnet-ef 工具版本
+├─ compose.yaml                 本機 PostgreSQL
+├─ src/Pasto.Server/            Api／Application／Domain／Infrastructure
 ├─ docs/
 │  ├─ requirements.md           需求規格
 │  ├─ architecture.md           架構設計
@@ -58,7 +62,9 @@ Pasto/
 
 ```powershell
 $env:PASTO_TEST_CONNECTION_STRING = 'Host=127.0.0.1;Port=55432;Database=pasto_test;Username=pasto_test;Password=<本機測試密碼>'
-dotnet test tests/Pasto.IntegrationTests/Pasto.IntegrationTests.csproj --configuration Release
+dotnet tool restore
+dotnet restore Pasto.slnx --locked-mode
+dotnet test Pasto.slnx --configuration Release --no-restore
 ```
 
 測試只接受 loopback 主機，且資料庫名稱須以 `_test` 結尾，避免誤連正式資料庫。

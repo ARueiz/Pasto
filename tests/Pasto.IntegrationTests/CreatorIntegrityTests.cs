@@ -1,7 +1,8 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using Pasto.IntegrationTests.Persistence;
+using Pasto.Server.Domain;
+using Pasto.Server.Infrastructure.Persistence;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -72,21 +73,21 @@ public sealed class CreatorIntegrityTests(ITestOutputHelper output)
         Assert.True(await verification.Participants.AnyAsync(x => x.Id == firstCreatorId));
     }
 
-    // Test fixture setup only, not a production CreateRoom use case or a code generator.
-    // Each SaveChanges sees at most one new entity, avoiding a tracked circular insert graph.
+    // 既有 Creator 正反例的 fixture，僅替換為正式模型／Migration；正式 CreateRoom 留在 S1-03。
+    // 每次 SaveChanges 僅有一個新 entity，避開 EF tracked graph 的循環排序；三次寫入仍在同交易。
     private static async Task InsertRoomAndParticipantAsync(
-        RoomTestDbContext context, Guid roomId, Guid creatorId, Guid participantId, string code)
+        PastoDbContext context, Guid roomId, Guid creatorId, Guid participantId, string code)
     {
         var createdAt = DateTime.UtcNow;
         var expiresAt = createdAt.AddHours(5);
-        context.CodeReservations.Add(new CodeReservationRecord
+        context.CodeReservations.Add(new RoomCodeReservation
         {
             Code = code,
             ReusableAfter = expiresAt.AddHours(24)
         });
         await context.SaveChangesAsync();
 
-        context.Rooms.Add(new RoomRecord
+        context.Rooms.Add(new Room
         {
             Id = roomId,
             Code = code,
@@ -96,7 +97,7 @@ public sealed class CreatorIntegrityTests(ITestOutputHelper output)
         });
         await context.SaveChangesAsync();
 
-        context.Participants.Add(new ParticipantRecord
+        context.Participants.Add(new RoomParticipant
         {
             Id = participantId,
             RoomId = roomId,

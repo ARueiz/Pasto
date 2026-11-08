@@ -10,7 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
@@ -18,6 +17,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <None Update="Persistence/schema.sql" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 測試引用正式模型與 Migration，不再維護另一套 schema／mapping。 -->
+    <ProjectReference Include="../../src/Pasto.Server/Pasto.Server.csproj" />
   </ItemGroup>
 </Project>
