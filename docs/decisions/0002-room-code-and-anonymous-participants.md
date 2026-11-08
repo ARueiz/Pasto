@@ -5,7 +5,8 @@
 - 取代：[ADR 0001 的未核定提案](0001-initial-architecture.md)，其狀態為 Withdrawn，保留歷史
 - 現行規格：[requirements.md](../requirements.md)、[architecture.md](../architecture.md)
 - 本輪範圍：文件更新，未實作、未安裝套件、未壓測
-- 後續：[Sprint 1 實作計畫](../sprint-1-implementation-plan.md)，等待使用者核准後才建立程式與 Migration
+- 後續：[Sprint 1 實作計畫](../sprint-1-implementation-plan.md)
+- 部分修訂：[ADR 0003](0003-mvp-scope-reduction.md)（2026-11-05）將第 9 項的 Keyset 分頁改為 MVP 整份快照、第 12 項的同步改為重抓整份快照，並將分層限流收斂為 MVP 基本限流；下文其餘決策不變。下文提及分頁、游標、SnapshotChanged 或 requestedCount 之處，MVP 以 ADR 0003 為準
 
 ## 背景與歷史處理
 

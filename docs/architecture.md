@@ -1,8 +1,8 @@
 ﻿# Pasto Sprint 1 — 最終架構與實作前修訂
 
-更新：2026-10-20。Q1～Q7、T1～T8 方向已確認；資料庫落實方式、限流／效能設定須實測，尚未實作。
+更新：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP（正式持久層優先、整份快照、基本限流）。Q1～Q7、T1～T8 方向已確認；限流／效能設定須實測，產品程式尚未實作。
 
-規則以 [requirements.md](requirements.md) 為準；[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md) 已補入本輪修訂，[ADR 0001](decisions/0001-initial-architecture.md) 只保留歷史。執行順序見 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)，等待核准後才建立程式／Migration。
+規則以 [requirements.md](requirements.md) 為準；現行決策見 [ADR 0002](decisions/0002-room-code-and-anonymous-participants.md) 與 [ADR 0003](decisions/0003-mvp-scope-reduction.md)，[ADR 0001](decisions/0001-initial-architecture.md) 只保留歷史。執行順序見 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)。
 
 ## 1. 系統邊界與分層
 
@@ -28,7 +28,9 @@ flowchart LR
 | Domain | 所有權、房主權限、5 小時有效性、8 KiB／300 筆規則；不依賴 HTTP、EF Core、SignalR 或其他層 |
 | Infrastructure | EF Core／PostgreSQL、CSPRNG、Credential hash、時間、通知 adapter；實作 Application 介面，依賴 Domain，不依賴 API |
 
-host 可引用 Infrastructure 組裝 DI。先清楚劃分命名空間／資料夾，不為分層建立大量空專案，不加通用 Repository、分頁或 CQRS 框架。單實例起步，不導入 Redis、Message Queue、Distributed Lock、Kubernetes 或每次寫入競爭的全站 DB 配額列。
+host 可引用 Infrastructure 組裝 DI。先清楚劃分命名空間／資料夾，不為分層建立大量空專案，不加通用 Repository、分頁或 CQRS 框架。
+
+專案結構（ADR 0003）：單一 `src/Pasto.Server`（ASP.NET Core host），以 `Api/`、`Application/`、`Domain/`、`Infrastructure/` 資料夾區分；`tests/Pasto.IntegrationTests` 引用它並對 Migration 建出的 schema 測試正式 use case；root 放 `.slnx` 與本機 PostgreSQL 的 `compose.yaml`。依賴方向暫以慣例與 Code Review 維持，出現跨層引用問題再把 Domain 拆成獨立專案。單實例起步，不導入 Redis、Message Queue、Distributed Lock、Kubernetes 或每次寫入競爭的全站 DB 配額列。
 
 ## 2. 識別、授權與身分保存
 
@@ -67,7 +69,9 @@ T8 必須保障：Owner／Creator 同房、房間與房主原子建立、RoomId 
 
 複合 FK 防止引用其他房間的 Participant。Creator 反向 FK 造成循環：預先產生 UUID，同一交易先插保留碼、Room，再插房主，commit 時檢查；不讓 Creator 長期 nullable，也不產生半完成房。清理 Room 時兩條 cascade 刪 children，反向關係 NO ACTION 延後至 commit 檢查。MVP 不提供單獨刪 Participant。
 
-PostgreSQL 可延後 FK 檢查，但 EF Core 可能先遇到 tracked graph 的排序問題，不能假設一次 SaveChanges 自動成功。第一階段比較分階段 EF 寫入與僅建房路徑的參數化 SQL（皆同一 DbTransaction），測 commit／rollback／cascade；不為循環把所有 CRUD 都改成手寫 SQL。[PostgreSQL constraints](https://www.postgresql.org/docs/current/ddl-constraints.html)、[SET CONSTRAINTS](https://www.postgresql.org/docs/current/sql-set-constraints.html)
+PostgreSQL 可延後 FK 檢查，但 EF Core 可能先遇到 tracked graph 的排序問題，不能假設一次 SaveChanges 自動成功。S1-01 已證明分階段 EF 寫入（同一 DbTransaction）可行；正式 CreateRoom 沿用此路徑，以整合測試驗 commit／rollback／cascade，不為循環把所有 CRUD 都改成手寫 SQL。
+
+正式 schema 由 EF Core Migration 建立；DEFERRABLE 複合 FK、CHECK 與部分索引以 `migrationBuilder.Sql()` 明確加入，整合測試檢查實際約束（ADR 0003）。S1-01 的測試用 `schema.sql` 在 Migration 涵蓋相同不變條件後移除。[PostgreSQL constraints](https://www.postgresql.org/docs/current/ddl-constraints.html)、[SET CONSTRAINTS](https://www.postgresql.org/docs/current/sql-set-constraints.html)
 
 簡單 IsCreator＋唯一部分索引只能保證最多一位，無法單獨保證每房提交時必有房主，不直接替代目前模型。若實測顯示循環成本不合理，再提出可維持全部不變條件的替代模型與反例測試，先修訂設計，不降級成僅靠 UI／應用慣例。
 
@@ -79,7 +83,7 @@ PostgreSQL 可延後 FK 檢查，但 EF Core 可能先遇到 tracked graph 的�
 | Rooms(ExpiresAt, Id) WHERE DeletedAt IS NULL | 到期掃描 |
 | Rooms(DeletedAt, Id) WHERE DeletedAt IS NOT NULL | 提前關房掃描 |
 | RoomParticipants(RoomId, Id) UNIQUE | 同房 FK、Participant 預算與 cascade 查找 |
-| ClipboardItems(RoomId, CreatedVersion DESC, Id DESC) | Keyset 穩定排序與房間資料查找 |
+| ClipboardItems(RoomId, CreatedVersion DESC, Id DESC) | 整份快照的穩定排序與房間資料查找；日後恢復 Keyset 分頁時沿用 |
 | ClipboardItems(RoomId, OwnerParticipantId) | Owner FK referencing-side 查找；FK 不自動建此索引 |
 | RoomCodeReservations(ReusableAfter, Code) | 保留碼回收 |
 | CHECK／NOT NULL | 計數／Version 非負、ContentBytes 為 1～8,192 且符合 UTF-8 octet_length(Content)、有效時間關係 |
@@ -90,7 +94,7 @@ Version 對實際新增、實際刪除及關房加一；加入／身分恢復不
 
 ## 4. REST 契約與錯誤
 
-受保護 API 帶 `Authorization: Bearer <participantCredential>`，使用不透明憑證驗證器，並非 JWT。每次限定 Participant.RoomId、路徑 Room.Id、item／cursor RoomId，檢查未過期且 DeletedAt 為 NULL。公開加入只知道 Code，不能以 Code 直接呼叫文字 API。
+受保護 API 帶 `Authorization: Bearer <participantCredential>`，使用不透明憑證驗證器，並非 JWT。每次限定 Participant.RoomId、路徑 Room.Id、item RoomId，檢查未過期且 DeletedAt 為 NULL。公開加入只知道 Code，不能以 Code 直接呼叫文字 API。
 
 | API | 驗證與成功結果 |
 | --- | --- |
@@ -98,7 +102,7 @@ Version 對實際新增、實際刪除及關房加一；加入／身分恢復不
 | POST /api/rooms/join，body: code | 公開猜碼／失敗／每房 Participant 保護；201 回新 Participant Credential 及房間資訊，isCreator=false |
 | GET /api/rooms/{roomId}/me | Bearer＋同房有效性；回自己的 Participant 與房主狀態，不建立新身分 |
 | GET /api/rooms/{roomId} | Bearer＋同房有效性；回 version、itemCount、totalBytes（統計）、expiresAt、serverTime、限制；不含文字 |
-| GET /api/rooms/{roomId}/items?limit=50&cursor=... | Bearer＋同房有效性；回 items、snapshotVersion、nextCursor、itemCount、expiresAt；每筆可回 isOwn／canDelete 供 UI，但後端仍授權 |
+| GET /api/rooms/{roomId}/items | Bearer＋同房有效性；一次回全部有效 items、snapshotVersion、itemCount、expiresAt（MVP 無 limit／cursor，ADR 0003）；每筆可回 isOwn／canDelete 供 UI，但後端仍授權 |
 | POST /api/rooms/{roomId}/items，body: content | Bearer；鎖內驗證 8 KiB／300 筆；Owner 取自驗證器；201 回 item 與 committedVersion，作同步提示，不直接拼入快照 |
 | DELETE /api/rooms/{roomId}/items/{itemId} | Bearer＋Owner；200 回 changed、committedVersion；同房不存在 changed=false、不扣計數／加版本；非本人 403，房主亦同 |
 | DELETE /api/rooms/{roomId} | Bearer＋Creator；設定 DeletedAt／Version，commit 後 204，Client 終止本房；其他人 403，已失效 404 |
@@ -113,7 +117,6 @@ Version 對實際新增、實際刪除及關房加一；加入／身分恢復不
 | 403 ItemDeleteForbidden／RoomDeleteForbidden | 身分有效但無操作權；不變更畫面成假成功 |
 | 404 RoomUnavailable | 不存在／過期／關房對外相同；清該 UUID 的本機狀態，不能靜默換房 |
 | 409 RoomItemLimitReached／ParticipantLimitReached | 300 筆或候選 Participant 預算已滿；不得把 TotalBytes 當容量錯誤 |
-| 409 SnapshotChanged | 跨頁期間版本改變；丟棄本次組裝，有限重試 |
 | 429 RateLimited | Retry-After；合併同步工作並退避，不每個通知各排重試 |
 | 503 Overloaded／ServiceUnavailable | 高負載或 DB 暫時失敗，明確顯示；結果不確定的 POST 不自動重送 |
 
@@ -139,31 +142,28 @@ Hub 使用同一 Participant 驗證器，SubscribeRoom(roomId) 驗證同房／�
 
 通知統一為 `RoomChanged { roomId, version }`，只代表已提交的房間狀態變動，沒有正文、itemId、previousVersion 或可回放的事件序號。關房也可發此提示，Client 接著 REST 得到 RoomUnavailable。重複／亂序只需保留最高 observedVersion 與一個 dirty 標記，不逐筆套用、不等版本連續、不保存事件佇列。
 
-Client 只需少量狀態：目前 Room.Id／generation、已顯示 snapshotVersion、最高 observedVersion、目前要求筆數 requestedCount、dirty、單一進行中工作、同步 UI 狀態。沒有事件缺號緩衝或完整局部新增／刪除狀態機。
+Client 只需少量狀態：目前 Room.Id／generation、已顯示 snapshotVersion、最高 observedVersion、dirty、單一進行中工作、同步 UI 狀態。沒有事件缺號緩衝或完整局部新增／刪除狀態機。
 
 ### 訂閱、通知合併與舊回應保護
 
-1. 註冊 handler → 建立 SignalR → SubscribeRoom 成功 → REST 第一頁。載入期間新提示更新 observedVersion／dirty，不排事件清單。
+1. 註冊 handler → 建立 SignalR → SubscribeRoom 成功 → REST 取整份快照。載入期間新提示更新 observedVersion／dirty，不排事件清單。
 2. 收到同房 version 大於本機時，合併通知安排同步。候選 debounce 150 ms、最長等待 500 ms，重複提示不各發 GET；已有進行中的工作只設 dirty，不開第二個同步流程。
 3. 提示只作是否需同步的依據。不能直接把通知的 version 當已套用版本，也不能只因最大提示版本已讀過就忽略到期／授權狀態檢查。
-4. 每個同步 round 從第一頁重建「目前要求的資料範圍」，暫存完成才整體替換。若只要求 50 筆就不主動抓 300；已要求全部時才可能重抓全部。此取捨會增加讀取，靠合併與壓測觀察，之後才評估單筆／局部更新。
+4. 每個同步 round 以一次 GET 取得整份快照，成功後整體替換。滿房時每次都重抓全部，此取捨會增加讀取，靠合併與壓測觀察，之後才評估分頁或局部更新（ADR 0003）。
 5. 切房、離開、身分／房間失效時增加 generation、AbortController 取消舊 round；同房新 round 亦有 request 序號。所有成功與錯誤回應先比對 Room.Id／generation／適用的 request 序號，過期的 401／404 亦不得清掉新房身分。快照另外要求候選 snapshotVersion 不低於已顯示版本才可提交。Abort 不是唯一保護，已完成／無法及時取消的回應仍須比對；metadata 與 /me 檢查同樣綁定發出時的身分／房間。
-6. round 期間若收到更新提示：可提交不倒退的同版本快照但維持「同步中」，完成後再合併跑一次；若候選版本已涵蓋最高 observedVersion，且沒有較新檢查／失效狀態，才標為同步完成。有限重試失敗保留明確過期標記，不能假稱最新。
+6. round 期間若收到更新提示：可提交不倒退的快照但維持「同步中」，完成後再合併跑一次；若候選版本已涵蓋最高 observedVersion，且沒有較新檢查／失效狀態，才標為同步完成。有限重試失敗保留明確過期標記，不能假稱最新。
 7. POST／DELETE 成功只安排一次重新同步（committedVersion 可作提示），不直接把回應 item 拼入既有快照。POST 不確定不重送；關房成功立即終止本房狀態。
 
-### 保留同版本分頁的最小修訂
+### 整份快照（MVP，ADR 0003）
 
-保留原游標的 RoomId＋snapshotVersion 綁定，不需要通用分頁框架或跨 HTTP 長交易；移除「讀頁後重放連續事件」步驟，改成 dirty 後重新同步。
+每房最多 300 筆 × 8 KiB，MVP 不分頁，避免簽章游標、跨頁版本衝突與部分載入狀態。
 
-- 每頁在短唯讀 REPEATABLE READ 交易內讀有效房間、Version 與 items，得到同頁一致性。排序 CreatedVersion DESC、Id DESC，DB 查詢限定 RoomId。
-- 游標帶 RoomId、snapshotVersion、最後排序鍵與 limit，以部署金鑰簽章並限制輸入長度；不能取代 Participant 授權。後續頁版本不同回 409 SnapshotChanged。
-- round 從第一頁開始，所有頁必須同一 V；遇 SnapshotChanged 丟棄該 round 的暫存頁，從第一頁重來，不把新舊頁合併成權威列表。候選每輪最多重試 3 次、短暫退避加 jitter，超過則顯示同步中／待重試並等待後續檢查，不能忙迴圈。
-- 預設每頁 50、最多 100；序列化 JSON 回應候選最大 1 MiB，包含 metadata、未壓縮。按實際 bytes 減少筆數，nextCursor 對應最後回傳列；不截斷單筆，8 KiB 單筆必能放進此預算。
-- requestedCount 起始 50，「載入更多」才增加，最多房間筆數。byte 上限可能讓單頁少回，round 依 cursor 繼續至所需範圍或無更多資料；同一次完整組裝才替換 items、版本、計數與游標。
-- 在已有頁面後按「載入更多」，為避免直接接上過期頁，簡單做法是從第一頁重建新的 requestedCount 範圍；只增加必要的目標範圍，不無條件下載全房。
-- 只有 cursor 已到終點且同版本組裝完成，才標示「此版本完整載入」；否則顯示「已載入 N／itemCount」。計數及正文以同一快照 V 顯示，較新 metadata 只提示待同步，不混成新版本資料。
+- 一次請求在短唯讀 REPEATABLE READ 交易內讀有效房間、Version、ItemCount 與全部 items，三者來自同一快照。排序 CreatedVersion DESC、Id DESC，DB 查詢限定 RoomId，使用 `ix_items_order`。
+- 回應不截斷單筆；滿房原文約 2.4 MB，加上 JSON 跳脫與欄位可能更大，大小與傳輸成本由壓測量測。
+- Client 以 snapshotVersion 不低於已顯示版本為提交條件，整體替換 items、版本與計數；較新 metadata 只提示待同步。
+- 沒有「載入更多」與「已載入 N／itemCount」狀態；載入中與同步中之外，畫面上的列表就是該版本的完整內容。
 
-持續高頻寫入的熱房可能讓多頁快照一直重試，這是方案 A 的已知限制；以短交易、有界 round、退避與同步 UI 處理，安靜後必須收斂。若壓測顯示不符合產品目標，再以新 ADR 評估增量／局部方案，第一版不預先實作。
+持續高頻寫入的熱房會讓每次提示都重抓整份快照，這是 MVP 的已知限制；以通知合併、單一進行中 round 與限流處理。若壓測顯示頻寬、DB 讀取或 p95 不符目標，再以新 ADR 恢復版本綁定的 Keyset 分頁（游標綁 RoomId＋snapshotVersion 並簽章、跨頁版本不同回 409 SnapshotChanged）或評估局部更新；現有排序索引可直接沿用。
 
 ### 遺漏、重連、前景與失效
 
@@ -190,6 +190,8 @@ Worker 只有 now ≥ ReusableAfter 且無 Rooms 引用才刪保留碼；FK 防�
 無產品層備份／還原；DELETE 不等於安全抹除，WAL、基礎設施快照、日誌及 Client 副本各有生命週期，部署前確認實況，不承諾全副本即時消失。
 
 ## 8. 分層防護與資源保護
+
+**MVP 範圍（ADR 0003）**：只實作 ASP.NET Core 內建 Rate Limiter 的公開建房／加入（每 IP＋全站 token bucket）、已驗證新增／刪除限制、每房 Participant 上限、DB pool 上限、可信代理與日誌脫敏；Hub 方法仍驗證身分與房間。本節其餘機制（錯碼退避、全站壓力模式、partition 上限、HTTP 分類並行、SignalR 細部配額、資源 admission）於 S7 依實測補齊，補齊前不發布公開站台。
 
 所有候選數字集中在需求第 5 節，標示「待安全測試與壓測調整」。公開建房／加入較嚴格，無效嘗試計數與退避、全站壓力模式共同防護，不只用單一 IP，也不因拿到某個房碼就繞過限流。全站壓力模式會影響合法加入，需監控／恢復遲滯，不能宣稱完全防止分散式猜碼。
 
@@ -226,8 +228,8 @@ HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻�
 
 ## 11. 驗證與演進條件
 
-第一階段先驗證真 PostgreSQL 的 Creator／Owner 複合 FK、EF 排序、deferred commit、cascade、同房併發及期限，不用 EF InMemory／SQLite 取代。分頁驗證同版本組裝、byte 邊界、簽章／跨房與同時間變動；Client 驗證 dirty／generation／單一 round，無需事件重放測試框架。
+第一階段以真 PostgreSQL 對正式 Migration 與正式 use case 驗證 Creator／Owner 複合 FK、EF 排序、deferred commit、cascade、同房併發及期限，不用 EF InMemory／SQLite 取代。列表驗證同交易快照、排序與滿房完整回傳；Client 驗證 dirty／generation／單一 round，無需事件重放測試框架。
 
-之後依需求 AC-01～AC-15 測安全與 1,000 連線、熱房、同 NAT、300 筆×8 KiB、重連風暴／補償流量，量測方案 A 的查詢／傳輸放大及熱房收斂。硬體、候選 p95、每秒 20 次平衡新增／刪除仍待實測。達瓶頸先調查詢、限制、通知合併及單實例資源；需要時才另評估局部同步、多實例 SignalR backplane／託管服務，不重採 ADR 0001 的共同權限模型。
+之後依需求 AC-01～AC-15 測安全與 1,000 連線、熱房、同 NAT、300 筆×8 KiB、重連風暴／補償流量，量測方案 A 整份快照的查詢／傳輸放大及熱房收斂。硬體、候選 p95、每秒 20 次平衡新增／刪除仍待實測。達瓶頸先調查詢、限制、通知合併及單實例資源；需要時才另評估局部同步、多實例 SignalR backplane／託管服務，不重採 ADR 0001 的共同權限模型。
 
-本輪僅文件修訂；未建立專案、程式、Migration 或執行應用程式測試／壓測。
+目前只有 S1-01 整合測試骨架；尚未建立產品專案、正式 Migration，也未執行應用程式測試／壓測。

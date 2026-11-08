@@ -1,8 +1,8 @@
 ﻿# Pasto Sprint 1 — 最終需求規格
 
-更新：2026-10-20（最終 Review）。Q1～Q7 與 T1～T8 的方向已確認；限流、資源與效能的候選值仍須安全測試／壓測。尚未實作。
+更新：2026-10-20（最終 Review）；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP 範圍（整份快照取代分頁、基本限流）。Q1～Q7 與 T1～T8 的方向已確認；限流、資源與效能的候選值仍須安全測試／壓測。產品程式尚未實作。
 
-現行依據：[architecture.md](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)。[ADR 0001](decisions/0001-initial-architecture.md) 只保留歷史。下一步見 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)，尚待核准。
+現行依據：[architecture.md](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。[ADR 0001](decisions/0001-initial-architecture.md) 只保留歷史。執行順序見 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)。
 
 ## 1. 產品定位與 MVP 範圍
 
@@ -47,17 +47,17 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 | 編號 | 確認內容 | 仍須驗證的範圍 |
 | --- | --- | --- |
 | T1 文字 | 原文最多 8 KiB = 8,192 UTF-8 bytes；每房最多 300 筆；無額外每房文字總量硬上限；超限拒絕、不截斷；前後端提示、後端為準 | 多位元中文字、emoji、空白、換行及邊界；TotalBytes 只作統計，不作 1.5 MiB 拒絕條件 |
-| T2 HTTP／分頁 | 新增 JSON Body 最大 32 KiB；Keyset 預設 50、最多 100 筆；CreatedVersion DESC、Id DESC；有效 Room＋Participant；游標綁房間／版本 | 回應 byte 上限實作、跨頁變動與簽章；不建通用分頁框架 |
-| T3 分層限流 | 公開猜碼／加入、已驗證 REST、每房寫入／Participant 建立、SignalR 連線／Hub 訂閱、全站資源分層保護 | 所有配額待安全測試與壓測調整；NAT、連續錯碼、分散來源、partition 有界及可信代理 |
+| T2 HTTP／列表 | 新增 JSON Body 最大 32 KiB；MVP 列表一次回傳該房全部文字（最多 300 筆）與 snapshotVersion，CreatedVersion DESC、Id DESC；有效 Room＋Participant（ADR 0003） | 滿房回應大小與 1,000 連線同時重抓的讀取放大；超出目標時再以新 ADR 恢復 Keyset 分頁 |
+| T3 分層限流 | MVP：公開建房／加入的每 IP 與全站限流、已驗證新增／刪除限制、每房 Participant 上限、可信代理；其餘分層防護於 S7 依實測補齊（ADR 0003） | 所有配額待安全測試與壓測調整；NAT、連續錯碼、分散來源、partition 有界；補齊前不發布公開站台 |
 | T4 全域資源 | 單一 Application＋PostgreSQL；並行請求、DB pool、連線、部署 CPU／記憶體／磁碟限制與監控；過載優先限制新建房及新加入 | 不做每次寫入競爭的全站 DB 配額計數器；單實例不代表多副本全域一致 |
 | T5 清理 | Worker 每分鐘一次、每批最多 100 房；安全重跑／補清；健康運作以失效後 10 分鐘內清主要資料為目標 | 每輪可有多批且受時間預算約束；交易時間、backlog、停機恢復、cascade |
 | T6 冷卻 | 獨立 PostgreSQL 保留碼；至少至原 ExpiresAt + 24 小時，提前關房不縮短；主資料先刪、保留碼獨立 | 唯一衝突／回收競爭／重試上限；之後可重用，不承諾永久唯一；舊 Credential 始終綁舊 UUID |
-| T7 同步 A | 先訂閱再讀；通知只表示變更，短時間合併、單一進行中的同步；版本不同就重取目前需要的資料；重連／前景恢復／15～20 秒 jitter 檢查 | 請求取消／序號、同版本分頁、部分載入與失效 UI；不建事件缺號緩衝、逐筆套用狀態機、事件重放、Outbox 或 exactly-once |
+| T7 同步 A | 先訂閱再讀；通知只表示變更，短時間合併、單一進行中的同步；版本不同就重取整份快照；重連／前景恢復／15～20 秒 jitter 檢查 | 請求取消／序號、舊回應保護與失效 UI；不建事件缺號緩衝、逐筆套用狀態機、事件重放、Outbox 或 exactly-once |
 | T8 交易 | PostgreSQL transaction＋Rooms 單列 Row Lock；文字、計數、Version 同交易；Owner／Creator 後端驗證；DeletedAt；鎖後重驗期限／關房；commit 後通知 | 第一階段真 PostgreSQL 整合測試驗證循環 FK、EF 寫入順序、DEFERRABLE、原子建立、複合 FK、cascade、併發與期限邊界；POST 不確定不自動重送 |
 
 8 KiB 是 bytes，不是固定中文字數。原單筆 4 KiB／每房 1.5 MiB 已取代。300 × 8,192 = 2,457,600 bytes 是既有規則推導出的原文最大量，不另設房間總量配額。TotalBytes 可同交易維護以供統計；未來檔案須獨立配額。
 
-32 KiB Body 是 JSON 傳輸位元組上限，8 KiB 是解析後原文 UTF-8 上限，分別驗證。極端 JSON 跳脫可能讓原文未超限但 Body 先超限，仍回傳明確錯誤，不截斷、不暗自調高上限。回應候選上限為未壓縮序列化 JSON 1 MiB／頁；接近上限時減少回傳筆數並給 nextCursor，不能截斷單筆。此 byte 預算須量測。
+32 KiB Body 是 JSON 傳輸位元組上限，8 KiB 是解析後原文 UTF-8 上限，分別驗證。極端 JSON 跳脫可能讓原文未超限但 Body 先超限，仍回傳明確錯誤，不截斷、不暗自調高上限。MVP 列表回傳整份快照，滿房時原文約 2.4 MB，加上 JSON 跳脫與欄位可能更大；不截斷單筆，實際大小與傳輸成本須量測。原「1 MiB／頁＋nextCursor」的分頁預算延後至恢復分頁時再訂。
 
 ## 4. 功能與非功能需求
 
@@ -65,10 +65,10 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 | --- | --- |
 | FR-01 | 建房原子建立 Room、房主 Participant 及 Code 保留紀錄，提交後回房碼、URL、expiresAt 與 Credential；不回傳半完成房。 |
 | FR-02 | 六碼／QR 加入產生新 Participant；恢復用原 Credential。Client 不能指定 Owner／Creator；所有受保護 REST／Hub 驗證身分、RoomId、有效性。 |
-| FR-03 | 多筆文字穩定分頁、新增、複製、刪自己；保留原文。剪貼簿權限被拒時可選取手動複製。 |
+| FR-03 | 多筆文字以穩定排序一次列出、新增、複製、刪自己；保留原文。剪貼簿權限被拒時可選取手動複製。 |
 | FR-04 | 房主關房提交後拒絕新操作；以通知及狀態檢查使他人 UI 失效。Worker 停止仍不能讀寫過期房。 |
-| FR-05 | 方案 A 合併通知後重取目前已要求的範圍，不每則各發一組 GET；完整組裝同版本後替換，載入部分不宣稱完整；無逐筆事件重放。 |
-| FR-06 | 顯示載入、部分載入、同步中、斷線、限流、結果不確定、身分失效及房間失效。MVP 斷線／重建快照時停用寫入、不排離線操作；複製仍可操作已顯示文字。 |
+| FR-05 | 方案 A 合併通知後重取整份快照，不每則各發一次 GET；取得後整體替換；無逐筆事件重放。 |
+| FR-06 | 顯示載入、同步中、斷線、限流、結果不確定、身分失效及房間失效。MVP 斷線／重建快照時停用寫入、不排離線操作；複製仍可操作已顯示文字。 |
 | NFR-01 | HTTPS/WSS、純文字呈現／CSP、Credential／內容脫敏日誌、no-store；無跨房間資料與舊回應污染。匿名不是端對端加密。 |
 | NFR-02 | DB Source of Truth，提交失敗不通知；提交成功後通知失敗不回滾或假報失敗；重複／亂序通知最多影響重抓頻率，不改本機資料內容。 |
 | NFR-03 | 1,000 連線／200 房／典型 5 人測試，另測熱房、同 NAT、併發、滿 300 筆、大量重連與 REST 補償流量；容量未驗證。 |
@@ -78,7 +78,7 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 
 ## 5. 初始安全與資源設定（待安全測試與壓測調整）
 
-以下都是可設定的實驗起點。Token bucket 表示持續補充速率與最大 burst；時間窗／失敗計數另明定。拒絕回 429／Retry-After；過載回 503。公開入口不新增獨立的「查房是否存在」介面，查詢／加入共用防護。
+以下都是可設定的實驗起點。依 [ADR 0003](decisions/0003-mvp-scope-reduction.md)，MVP 只實作「公開建房」、「公開加入／猜碼」的 token bucket、「已驗證 REST」的新增／刪除限制、「每房寫入／新 Participant」的 Participant 上限與「DB pool」；其餘列於 S7 依安全測試／壓測補齊，補齊前不發布公開站台。Token bucket 表示持續補充速率與最大 burst；時間窗／失敗計數另明定。拒絕回 429／Retry-After；過載回 503。公開入口不新增獨立的「查房是否存在」介面，查詢／加入共用防護。
 
 | 層 | 候選初始值 | 理由／限制 |
 | --- | --- | --- |
@@ -105,24 +105,24 @@ MVP 不設每次寫入競爭的全站資料庫配額列，不用 TotalBytes 實�
 | --- | --- |
 | AC-01 | 建房／房主／保留碼原子成功或全回滾，Code 碰撞有界重試，不回他人房間。跨房 Owner／Creator 被 DB 複合 FK 拒絕。 |
 | AC-02 | 手輸／URL／QR 加入；QR 無 Credential，手機非房主；F5 恢復不建新 Participant。主動離開清本分頁，遺失身分不恢復舊權限；Session Restore 不誤稱已銷毀。 |
-| AC-03 | A／B 各建一筆，只刪自己；房主也不能單刪他人的文字，但可關房。改 RoomId、itemId、Owner／Creator 或 cursor 不繞過授權。 |
+| AC-03 | A／B 各建一筆，只刪自己；房主也不能單刪他人的文字，但可關房。改 RoomId、itemId 或 Owner／Creator 不繞過授權。 |
 | AC-04 | 8,192 原文 bytes 可接受、8,193 拒絕；含中文字／emoji／換行／原始空白，無靜默截斷；空白拒絕；Body 32 KiB 與原文限制分測，超 body 回 413。 |
 | AC-05 | 有空位時 200 筆各 8 KiB（總計超過舊 1.5 MiB）仍可新增；TotalBytes 正確但不參與房間容量拒絕。第 301 筆拒絕。299 筆時併發新增只有一筆成功。 |
 | AC-06 | 併發刪同筆只扣一次計數／Version，刪除 Owner 在後端驗證；關房／加入／新增／刪除／清理同鎖序，不留下孤兒、負計數或跨房資料。 |
-| AC-07 | Keyset 預設 50、最多 100，穩定排序；單頁 byte 上限可少回但不截文字，cursor 正確。跨頁版本變動回 SnapshotChanged，重抓完整所需範圍，不混頁。 |
-| AC-08 | 先訂閱後載入；重複／亂序通知合併，單一進行中同步。只換整個同版本所需快照，不逐筆套事件；不要求版本連續；舊 GET／換房／離開／關房後晚回應不能污染畫面，舊 401／404 也不能清除新房狀態。 |
-| AC-09 | commit 後通知前當機、最後通知遺漏、重連及回前景皆可由 REST 修復；依 Q6 量測 20～30 秒主要目標與約 60 秒容許上限。部分載入標示正確，缺頁不宣稱完整。 |
+| AC-07 | 列表一次回傳全部有效文字，CreatedVersion DESC、Id DESC 穩定排序；items、itemCount 與 snapshotVersion 來自同一交易；滿房 300 筆×8 KiB 完整回傳不截斷；查詢限定 RoomId 並使用排序索引。 |
+| AC-08 | 先訂閱後載入；重複／亂序通知合併，單一進行中同步。只整體替換快照，不逐筆套事件；不要求版本連續；舊 GET／換房／離開／關房後晚回應不能污染畫面，舊 401／404 也不能清除新房狀態。 |
+| AC-09 | commit 後通知前當機、最後通知遺漏、重連及回前景皆可由 REST 修復；依 Q6 量測 20～30 秒主要目標與約 60 秒容許上限。 |
 | AC-10 | 到期 5 小時／提前關房即拒絕後續讀寫／訂閱，即使 Worker 停用。期限依鎖後 DB 檢查點，Client 時鐘與活動不延長；邊界及等待鎖後過期均測試。 |
 | AC-11 | 每分鐘清理、每批最多 100，健康情況目標失效後 10 分鐘內刪 Rooms／Participants／items；重跑／停機補清無誤，backlog 與交易時間可觀測。 |
 | AC-12 | 保留碼至少至原 ExpiresAt + 24 小時，提前關房／主資料 cascade 不提早釋放；到期且無 Rooms 引用才回收；重配後舊 UUID／Credential 無新房權限。 |
-| AC-13 | 無效碼連續／分散猜測、同 NAT 合法流量、偽造 proxy header、partition 耗盡與 Hub invocation 濫用有預期防護；無文字／Credential 日誌、HTML 純文字呈現。 |
+| AC-13 | MVP：建房／加入超額回 429、偽造 proxy header 無效、無效 Credential 無法訂閱 Hub；無文字／Credential 日誌、HTML 純文字呈現。S7：無效碼連續／分散猜測、同 NAT 合法流量、partition 耗盡與 Hub invocation 濫用有預期防護。 |
 | AC-14 | 1,000 連線／200 房、熱房、滿 300 筆×8 KiB、重連與 REST 補償壓測；記錄硬體、設定、合法成功率、429／5xx、p95、修復延遲、DB／CPU／記憶體／磁碟。不能靠拒絕正常流量達標。 |
 | AC-15 | DB 失敗不假報成功／發事件；通知失敗不回滾提交；POST 回應遺失提示結果不確定並檢查狀態，不自動重送。API 明確區分驗證、權限、失效、限流及過載。 |
 
 ## 7. 仍需實測的設定與實作邊界
 
-產品規則不再待定；需實測的是 FK／EF 寫入與刪除行為、同房競爭與期限、分頁 byte 預算、方案 A 在熱房的重抓成本、限流／NAT 取捨、Worker 吞吐與資源配置。候選壓測基準：每房起始 50 筆、平均 1 KiB、全站每秒 20 次平衡新增／刪除、觀察 30 分鐘，再測 8 KiB／300 筆與階梯負載；這些數值仍可依測量調整。
+產品規則不再待定；需實測的是 FK／EF 寫入與刪除行為、同房競爭與期限、整份快照的回應大小、方案 A 在熱房的重抓成本、限流／NAT 取捨、Worker 吞吐與資源配置。候選壓測基準：每房起始 50 筆、平均 1 KiB、全站每秒 20 次平衡新增／刪除、觀察 30 分鐘，再測 8 KiB／300 筆與階梯負載；這些數值仍可依測量調整。
 
 Phase 2 檔案方向另見架構：Object Storage 存內容、PostgreSQL 存 Metadata、沿用所有權與期限、獨立配額及可重試清理。本次不建 RoomFiles、IFileStorage、檔案 API 或套件。
 
-本輪只完成文件與實作計畫，等待使用者核准，不建立專案、程式碼或 Migration。
+實作進度以 [Sprint 1 實作計畫](sprint-1-implementation-plan.md) 為準。
