@@ -1,6 +1,6 @@
 namespace Pasto.Server.Domain;
 
-// 僅包含資料模型，不依賴 EF／HTTP。交易、授權及容量規則將由後續 use case 實作。
+// 僅包含資料模型，不依賴 EF／HTTP。模型本身不執行交易，相關規則由 use case／DB 共同保障。
 public sealed class Room
 {
     public Guid Id { get; set; }
