@@ -1,31 +1,32 @@
-﻿# Pasto — Sprint 1 分階段實作計畫
+# Pasto — Sprint 1 分階段實作計畫
 
-日期：2026-10-20。狀態：**待使用者核准，尚未執行**。本輪只產出文件，不建立專案、程式碼、Migration、容器或套件。
+日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1-01、S1-02 已完成；S1-03 及後續尚未開始**（2026-11-08）。已有正式 host／持久層骨架、初始 Migration 與六個整合測試，尚無產品 endpoint；實測與執行方式見 [testing.md](testing.md)。先前的 UI Prototype 已移除，S4 前端待重新討論。
 
-依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)。ADR 0001 僅供歷史比較，不是實作來源。
+依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。ADR 0001 僅供歷史比較，不是實作來源。
 
 ## 1. 執行原則與順序
 
 以小範圍、可驗證的變更逐步完成 MVP。每階段可分成數個獨立 Review 的小 patch；先執行與本次變更相關的 Build／Lint／Tests，記錄實際結果，不在全部完成前稱 MVP 已完成。
 
-順序：**S1 DB 正確性 → S2 房間／匿名授權 → S3 文字／分頁 → S4 基本 UI → S5 方案 A 即時同步 → S6 清理／冷卻 → S7 防護／資源 → S8 壓測與收尾**。
+順序：**S1 正式持久層與 DB 正確性 → S2 房間／匿名授權 → S3 文字／快照列表 → S4 基本 UI → S5 方案 A 即時同步 → S6 清理／冷卻 → S7 防護／資源 → S8 壓測與收尾**。
 
-S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用。S2 開始已有基本輸入、Credential 脫敏與公開限流；S7 是完整安全／資源驗證，不代表前幾階段刻意不做基本保護。尚未完成防護的階段只在隔離本機環境驗證，不發布公開站台。
+S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用。S2 開始已有基本輸入、Credential 脫敏與 ADR 0003 的基本限流；S7 補齊其餘分層防護並做完整安全／資源驗證。S7 完成前只在隔離本機環境驗證，不發布公開站台。
 
-本計畫獲准後才建立最小必要專案、依賴與環境；不預先建立大量空專案。後續若需要改已核定不變條件或增加 MVP 外需求，先提出影響與修訂，不自行擴張。
+S1-01 依核准建立最小必要測試專案與相依，沿用既有 DB；不預先建立大量空專案。後續若需要改已核定不變條件或增加 MVP 外需求，先提出影響與修訂，不自行擴張。
 
-## 2. S1：PostgreSQL 資料模型與交易整合測試
+## 2. S1：正式持久層與交易整合測試
 
-目的：用真 DB 證據排除循環 FK、EF 寫入順序、清理與併發風險，先證明不變條件再做 HTTP／UI。
+目的：用真 DB 證據排除循環 FK、EF 寫入順序、清理與併發風險，先證明不變條件再做 HTTP／UI。依 ADR 0003，S1-02 起整合測試改跑正式 Migration 與正式 use case，不再擴充測試專用的 mapping 或寫入 helper。
 
 | 小工作 | 交付 | 驗收條件 |
 | --- | --- | --- |
-| S1-01 最小完整性測試骨架 | 最小 .NET 10 測試／持久層範圍、固定 PostgreSQL／EF provider 版本的候選清單、可拋棄測試 DB／schema、四表測試 DDL／mapping、執行說明 | 真 PostgreSQL 可重跑；不是 InMemory／SQLite；不連共享／正式 DB，不建立完整 API／前端；測試失敗確實使指令失敗 |
-| S1-02 Creator／Owner 約束 | 複合 FK、DEFERRABLE／NO ACTION 與 cascade 的整合測試；比較分階段 EF 與窄範圍參數化 SQL 的建房交易 | 同房有效建立 commit；跨房 Owner／Creator、缺房主及中途失敗均不留下部分資料；循環建立可用 EF／同一 DbTransaction 實際完成，不只手寫 SQL 成功 |
-| S1-03 併發交易核心 | 後續可重用的最小新增／刪除／關房交易路徑與整合測試，分成新增、刪除、關房三個小 patch | 299 筆併發新增僅一個成功；刪同筆只扣一次；Owner 權限正確；關房／新增／刪除同鎖序，無負計數／額外 Version，TotalBytes 等於實際統計且不作容量拒絕 |
-| S1-04 期限／清理關聯 | 到期邊界、等待鎖後到期、Room cascade 與保留碼回收的測試，附 schema 選擇結論 | 過期／DeletedAt 在鎖後重驗；刪 Room 清 Participant／items，保留碼仍在；冷卻前／仍有 Room 引用不能回收；原子 rollback、FK deferred commit／違約失敗均符合預期 |
+| S1-01 最小完整性測試骨架（已完成） | 最小 .NET 10 測試／持久層範圍、固定 PostgreSQL／EF provider 版本、可拋棄測試 DB／schema、四表測試 DDL／mapping、執行說明 | 真 PostgreSQL 可重跑；不是 InMemory／SQLite；不連共享／正式 DB；測試失敗確實使指令失敗 |
+| S1-02 正式持久層骨架（已完成） | `src/Pasto.Server`（Api／Application／Domain／Infrastructure 資料夾）、root `.slnx`、本機 PostgreSQL `compose.yaml`、正式 DbContext 與初始 Migration（DEFERRABLE 複合 FK、CHECK、部分索引以 `migrationBuilder.Sql()` 加入）；測試專案改引用正式專案 | 既有兩個 Creator 案例改跑 Migration 建出的 schema 並通過；整合測試檢查 `pg_constraint` 的 deferred／cascade 定義與 S1-01 相同；移除測試用 `schema.sql` 與 `RoomTestDbContext` |
+| S1-03 建房與 Owner／cascade | 正式 CreateRoom 交易（保留碼 → Room → 房主，分階段 EF＋同一 DbTransaction、Code 碰撞有界重試）與 Owner／cascade 測試 | 同房有效建立 commit；跨房 Owner／Creator、缺房主及中途失敗均不留下部分資料；刪 Room 清 Participant／items，保留碼仍在 |
+| S1-04 併發交易核心 | 正式的新增／刪除／關房交易路徑與整合測試，分成新增、刪除、關房三個小 patch | 299 筆併發新增僅一個成功；刪同筆只扣一次；Owner 權限正確；關房／新增／刪除同鎖序，無負計數／額外 Version，TotalBytes 等於實際統計且不作容量拒絕 |
+| S1-05 期限邊界 | 到期邊界、等待鎖後到期、DeletedAt 的測試 | 過期／DeletedAt 在鎖後依 DB 當下時間重驗；原子 rollback、FK deferred commit／違約失敗均符合預期。保留碼回收的測試隨 S6 Worker 一起做 |
 
-第一個可交付 patch 只做 S1-01 與最基本正反例，不一次加入所有交易或 UI。之後擴充實際可重用的交易核心，不在測試內另寫一套永遠不會被應用使用的商業實作。
+S1-01 已交付；之後每個小工作都直接擴充可重用的正式程式，不在測試內另寫一套永遠不會被應用使用的商業實作。
 
 測試設計要求：
 
@@ -34,39 +35,40 @@ S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用�
 - EF tracked graph 可能先判循環；測實際選定寫入路徑、tracking 狀態及 DbTransaction，共用 transactional connection，不只測 DB 支援 DEFERRABLE。
 - 測到期前／檢查點等於或晚於 ExpiresAt／已關房，以及持鎖等待後再檢查。以可控制 fixture 時間與 DB 當下時間驗證，避免只用 Client 時鐘或交易起始時間。
 - 200 筆×8 KiB 超過舊 1.5 MiB 必須可成立，300／301 筆與單筆 byte 邊界分別驗證；沒有每房總量上限的測試設定。
-- 第一階段用隔離測試 schema 驗證，不先產正式 Migration；選定落實方式後，S2 再整理可審閱的正式 schema／Migration。
+- 每個案例仍使用獨立 schema；S1-02 起以正式 Migration 建立該 schema，而非測試用 DDL。Migration 內手寫的約束 SQL 需 Review，並由測試檢查實際約束定義。
 
-必要依賴以 EF Core／PostgreSQL provider、測試 runner 為限；xUnit 是候選 runner（用途是可重跑整合測試；MSTest 亦可，先確認版本相容性），DB 可用既定 Docker Compose 啟動，不為此先加 Testcontainers。精確版本與最小清單在獲准後的 S1-01 小變更中列清楚，本輪不安裝。
+S1-01 已採 EF Core／PostgreSQL provider、xUnit 與 VSTest runner，固定版本及直接／間接相依 lock file 見 [testing.md](testing.md)。沒有加入 Testcontainers；S1-02 已新增產品專案、Migration 工具鏈與 Compose，相依用途與版本見 testing.md。
 
 **S1 出口條件**：上述不變條件有真 DB 的通過／失敗證據，記錄採用 FK／EF 寫入方式與指令。若循環成本過高，先提出同樣保證同房／必有房主／原子性／無孤兒的替代，不以 IsCreator 唯一索引或應用檢查單獨降級 DB 保證；未解決前不展開依賴此模型的大量 API。
 
 ## 3. S2：房間、匿名 Participant 與授權 REST
 
-交付以小 use case 拆分：建房與房主 Credential → Join／恢復 → 房間狀態與房主關房。建立最小 API host、DI／設定／ProblemDetails、正式 schema／Migration 與本機 DB Compose；Migration 必須沿用 S1 驗證模型，不含檔案表。
+交付以小 use case 拆分：建房與房主 Credential → Join／恢復 → 房間狀態與房主關房。在 S1-02 建立的 `Pasto.Server` 上加入 REST endpoint、DI／設定與 ProblemDetails；schema 沿用 S1 的正式 Migration，不含檔案表。
 
-同時具備 CSPRNG 六碼／唯一碰撞有界重試、Credential hash、sessionStorage 對應契約、5 小時／DeletedAt 驗證；初始公開限流、可信代理設定、no-store／日誌脫敏與有限 DB pool 先到位。沿用 S1 交易核心，不另寫第二套邏輯。
+同時具備 CSPRNG 六碼／唯一碰撞有界重試、Credential hash、sessionStorage 對應契約、5 小時／DeletedAt 驗證；ADR 0003 的基本限流（建房／加入每 IP＋全站）、可信代理設定、no-store／日誌脫敏與有限 DB pool 先到位。沿用 S1 交易核心，不另寫第二套邏輯。
 
 驗收：
 
 - AC-01～AC-03 的建房／加入／跨房權限部分、AC-10 的即時失效，以及 AC-15 的不確定 POST 錯誤語意可用 HTTP 整合測試驗證。
 - 建房回應／QR 用的 URL 不帶 Credential；/me 恢復不新增身分；無效 Credential 不取得他房身分。
 - 一般人不能關房，房主關房後讀寫／加入拒絕；DB／通知暫時未接完整時不顯示假成功。
-- 正式 schema 在隔離 DB 可建立，Migration SQL 與 S1 不變條件一致；本階段才建立／在隔離環境驗證 Migration，不觸碰使用者既有或正式資料庫。
+- 建房／加入超過限流回 429 與 Retry-After；不觸碰使用者既有或正式資料庫。
 
-## 4. S3：文字 CRUD、容量及 Keyset Pagination
+## 4. S3：文字 CRUD、容量及整份快照列表
 
-交付分三段：新增／刪自己的文字 → metadata → 版本綁定 Keyset。新增 8 KiB 與 JSON Body 32 KiB 分別驗證、300 筆鎖內檢查、TotalBytes 只統計；API 不接受 Owner／Creator 欄位。游標綁 RoomId／snapshotVersion／排序鍵／limit 並簽章，不加通用分頁框架或單筆同步 API。
+交付分三段：新增／刪自己的文字 → metadata → 整份快照列表（ADR 0003）。新增 8 KiB 與 JSON Body 32 KiB 分別驗證、300 筆鎖內檢查、TotalBytes 只統計；已驗證新增／刪除限流；API 不接受 Owner／Creator 欄位。不加分頁、游標或單筆同步 API。
 
 驗收：
 
-- AC-03～AC-07：UTF-8 多位元／空白／換行保留，8,192／8,193 bytes、32 KiB body 邊界、超舊總量可新增、第 301 筆拒絕，併發計數／Version 正確。
-- 預設 50、最多 100；無重複／跳頁排序錯誤；byte 上限可能少回但 nextCursor 正確、不截斷文字。原文合法但 JSON 過大時明確 413。
-- 竄改／他房游標無法跨房；兩頁中間新增或刪除回 SnapshotChanged，不假回一致列表；查詢計畫使用房間／排序索引，查詢有界。
+- AC-03～AC-07：UTF-8 多位元／空白／換行保留，8,192／8,193 bytes、32 KiB body 邊界、超舊總量可新增、第 301 筆拒絕，併發計數／Version 正確。原文合法但 JSON 過大時明確 413。
+- 列表一次回傳全部有效文字，排序穩定；items、itemCount、snapshotVersion 同一交易；滿房 300 筆×8 KiB 完整回傳不截斷，記錄回應大小；查詢計畫使用房間／排序索引。
 - Owner 授權在後端，房主也不能刪他人單筆；同房不存在為 changed=false，不另扣計數或加 Version。
 
 ## 5. S4：最小前端與身分／分享操作
 
-交付 React + TypeScript + Vite 基礎頁面：建房、輸入碼／URL 加入、Client QR、sessionStorage 恢復與主動離開、文字輸入／byte 提示／列表／載入更多／複製／刪自己／房主關房。分成「身分分享」及「文字操作」兩個小 patch；尚未完成 SignalR 前以明確手動刷新驗證，不宣稱已即時。
+先前由其他工具產生的 UI Prototype 已移除；開始 S4 前先與使用者討論版面與互動方向，再建立前端專案。
+
+交付 React + TypeScript + Vite 基礎頁面：建房、輸入碼／URL 加入、Client QR、sessionStorage 恢復與主動離開、文字輸入／byte 提示／列表／複製／刪自己／房主關房。分成「身分分享」及「文字操作」兩個小 patch；尚未完成 SignalR 前以明確手動刷新驗證，不宣稱已即時。
 
 驗收：
 
@@ -77,14 +79,14 @@ S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用�
 
 ## 6. S5：SignalR 與方案 A 同步
 
-交付 Server RoomChanged／授權訂閱，再交付 Client 合併提示、單一 round、同版本快照組裝、requestedCount／部分載入、generation／AbortController、重連與前景／15～20 秒 jitter 檢查。分成「授權與提交後提示」及「Client 同步」小 patch，不建立事件缺號緩衝、單筆 GET、局部刪除狀態機、Outbox 或重放框架。
+交付 Server RoomChanged／授權訂閱，再交付 Client 合併提示、單一 round、整份快照替換、generation／AbortController、重連與前景／15～20 秒 jitter 檢查。分成「授權與提交後提示」及「Client 同步」小 patch，不建立事件缺號緩衝、單筆 GET、局部刪除狀態機、Outbox 或重放框架。
 
 驗收：
 
 - AC-08／AC-09：先訂閱再讀；連續大量重複／亂序通知只安排有界工作；提示版本非連續也正常重建，Server 不假裝保證交付。
 - 兩瀏覽器新增／刪除後 REST 收斂，通知只含 Room.Id／version；其他房無資料／提示。commit 失敗無提示，commit 後通知失敗資料仍可讀。
-- 慢 GET、切房、離開、401、關房後晚回應不能覆蓋新狀態，舊房晚到的 401／404 也不能清新房；所有暫存頁同版本才替換；SnapshotChanged 有限重試、無忙迴圈，持續寫入時明確同步中、安靜後收斂。
-- 只要求 50 筆不抓滿 300；載入更多重建新目標範圍；部分載入不宣稱完整。重連重驗／重新訂閱；回前景檢查。
+- 慢 GET、切房、離開、401、關房後晚回應不能覆蓋新狀態，舊房晚到的 401／404 也不能清新房；快照版本不低於已顯示版本才替換；失敗有限重試、無忙迴圈，持續寫入時明確同步中、安靜後收斂。
+- 重連重驗／重新訂閱；回前景檢查。
 - 故意丟最後一次通知與模擬通知前程序中斷，記錄健康前景修復延遲；先做功能證據，最終 1,000 人時間目標在 S8 驗證。
 
 ## 7. S6：Worker、冷卻回收與生命週期
@@ -100,7 +102,7 @@ S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用�
 
 ## 8. S7：安全、資源與監控整合
 
-交付需求第 5 節的可設定候選值、公開錯碼退避／全站壓力模式、已驗證配額、Hub 方法限制、分類 HTTP 並行、pool／連線／部署限制、bounded partition 與恢復遲滯。敏感資訊脫敏／CSP／Origin／代理驗證及指標分開 Review。
+在 S2／S3 的基本限流之上，依壓測／安全測試補齊 ADR 0003 延後的項目：公開錯碼退避／全站壓力模式、Hub 方法與 SignalR 連線配額、分類 HTTP 並行、部署資源 admission、bounded partition 與恢復遲滯；並校正需求第 5 節的候選值。敏感資訊脫敏／CSP／Origin／代理驗證及指標分開 Review。
 
 驗收：
 
@@ -120,7 +122,7 @@ S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用�
 | --- | --- |
 | 1,000 連線／約 200 房／典型 5 人 | 公開建房／加入暖機及升載過程、metadata 約 50～67 req/s、實際寫入＋所有快照補償；不能忽略衍生讀取 |
 | 同一 NAT／公司／學校出口 | 既有千條連線與新加入速率分開測；合法成功率／429，不能只用不同 IP 模擬就聲稱支援 NAT |
-| 熱房／最大文字 | 高集中度多人新增刪除、300 筆×8 KiB、所有人已載入多頁；觀察快照衝突／重抓、UI 收斂及網路用量 |
+| 熱房／最大文字 | 高集中度多人新增刪除、300 筆×8 KiB；觀察整份快照重抓的頻寬、DB 讀取、UI 收斂；據此決定是否以新 ADR 恢復分頁 |
 | 重連／通知遺漏 | 大量同時重連 jitter、全部或部分提示遺漏、回前景補償；修復主目標 20～30 秒、健康情況約 60 秒容許上限 |
 | 濫用／資源／清理 | 分散錯碼、partition 耗盡、pool／CPU／記憶體／磁碟壓力、過期 backlog 與清理保留資源 |
 
@@ -128,10 +130,10 @@ S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用�
 
 S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間目標，如實標示未達與瓶頸／調整提案，不標成已支援；涉及架構改動另 Review。完整 Build／Lint／相關 Tests 通過後，無新修改或疑慮不重複擴大測試。
 
-## 10. 建議第一個實作任務與完成回報
+## 10. 下一個實作任務與完成回報
 
-**建議第一個任務：S1-01「建立最小 PostgreSQL／EF Core 完整性測試骨架」**，接著只驗證一個同房建房／房主成功 commit 與一個跨房 Creator 失敗反例。先取得真 DB 與 EF 寫入證據，再增 Owner／cascade／併發案例；不從完整前後端專案生成開始。
+S1-01、S1-02 已完成。正式 DbContext、Migration、Solution、Compose 與工具鏈已就緒；六個整合測試通過，舊測試 DDL／mapping 已移除。**下一個任務：S1-03「建房與 Owner／cascade」**，之後為 S1-04 併發交易核心、S1-05 期限邊界。
 
-每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。只有計畫獲准才開始上述工作，本輪無任何階段已完成的宣稱。
+每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完成 S1-01／S1-02 持久層骨架與六個整合案例，不代表 S1 全階段或完整 MVP 已完成。
 
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。
