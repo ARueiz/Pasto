@@ -1,6 +1,6 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-09，S1-03。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom，尚無產品 API、前端或 SignalR。
+更新：2026-11-16，S1-04 Patch 1。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom／AddItem，尚無產品 API、前端或 SignalR。
 
 ## 1. 環境與相依
 
@@ -44,7 +44,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-預期 24 個通過、0 個失敗（23 個真 DB 案例、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+預期 51 個通過、0 個失敗（42 個真 DB 案例、8 個新增文字輸入／取消測試、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
@@ -52,12 +52,13 @@ dotnet format Pasto.slnx --no-restore --verify-no-changes
 | RoomCreationTests（11 例） | 已用碼／冷卻碼碰撞、重試上限、非房碼 unique 錯誤不重試、寫入後／commit 前失敗、取消、commit 後結果遺失、兩交易房碼競爭 |
 | OwnershipAndCascadeTests（5 例） | Owner 同房正反例、帶文字實際刪房 cascade／保留碼／他房保留、單刪 Creator／被引用保留碼拒絕 |
 | RoomSecretsTests（1 例） | 六碼格式、128-bit 原始隨機值的 Base64URL 格式與 SHA-256 編碼一致性，不以抽樣宣稱密碼學強度 |
+| ItemAdditionTests（27 例） | 文字驗證、同房／容量／失效檢查、一般參與者、真 DB 鎖競爭與取消／逾時、統計／版本、提交前回滾及提交後例外；見 S1-04 工作項 |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
 | MigrationHistory_IsIsolatedPerTestSchema | 兩個 schema 各自建表／記 Migration；回退其中一個不影響另一個 |
 
-Creator 案例已改跑正式 CreateRoom／RoomCreationStore，移除原本的建房寫入 helper。`TestRoomCreation` 只組裝正式服務；故障／非法資料由測試 interceptor 注入，產品沒有測試專用開關。Owner／cascade 測試的文字資料準備仍為 fixture，正式新增文字流程在 S1-04 實作。
+Creator 案例已改跑正式 CreateRoom／RoomCreationStore，移除原本的建房寫入 helper。`TestRoomCreation` 只組裝正式服務；故障／非法資料由測試 interceptor 注入，產品沒有測試專用開關。Owner／cascade 測試的文字資料準備仍為 FK／刪除 fixture；S1-04 的容量前置資料全部使用正式 AddItem，不複製寫入邏輯。
 
 ## 4. Migration 與 host 的操作
 
@@ -121,5 +122,17 @@ Claude 本輪僅做靜態審查；上述測試由實作方重跑，不宣稱為�
 - F2 尚無 SQL 往返／效能量測，保留預設 savepoint，延至 S8 評估。Program.cs 的 DI／ValidateOnStart 與 HTTP 取消處理測試列入 S2。
 
 尚未驗證：新增／刪除／關房的正式交易、文字容量競爭與計數一致性、期限邊界、REST／UI／SignalR、授權與完整安全／負載測試。S1-03 的房碼碰撞競爭不等於 S1-04 的文字併發已完成。
+
+### S1-04 Patch 1 驗證紀錄（2026-11-16）
+
+- 從 main `1ad0e2b` 建立 `feature/s1-04-item-transactions`；新增 AddItem／ItemAdditionStore，無 schema／套件變更。
+- `dotnet build Pasto.slnx -c Release --no-restore`：通過，0 warning／0 error。
+- `dotnet format Pasto.slnx --no-restore --verify-no-changes` 與 `git diff --check`：通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s1-04-patch1-full.trx"`：51 passed／0 failed／0 skipped；新增 27 例含 19 個真 DB 案例及 8 個輸入／預先取消案例。
+- 測試完成後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：0 個 schema，無測試殘留。
+- 首次 Build 缺少測試的 Persistence using（CS0246），補齊後成功。
+- 首次針對性測試因執行指令未接受 `.env` 設定名稱旁空白，未帶入密碼：8 passed／17 failed；修正本機指令解析後，24 passed／1 failed。該失敗是預期例外型別不符：Npgsql EF 預設策略以 InvalidOperationException 包住 55P03；改為明確檢查內層 PostgreSQL SQLSTATE 並驗證只嘗試一次，未改產品重試行為。
+- 失敗 TRX 保留為 `s1-04-patch1-initial.trx`、`s1-04-patch1-verified.trx`；最終為 `s1-04-patch1-full.trx`，皆在忽略的本機 TestResults。
+- 待使用者獨立 review；未執行刪除／關房、S1-05 精確期限邊界、HTTP／SignalR／負載測試，因不在 Patch 1 範圍。DI 的 host 層驗證同既定計畫留 S2。
 
 S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其中舊 DDL／mapping 不是現行實作。
