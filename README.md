@@ -14,8 +14,9 @@
 | S1-01 PostgreSQL／EF Core 整合測試骨架 | 已完成（2 個 Creator 正反例） |
 | S1-02 正式持久層骨架 | 已完成（正式 Migration；共 6 個整合測試通過） |
 | S1-03 正式建房與 Owner／cascade | 已由 PR #2 合併至 main（1ad0e2b） |
-| S1-04 併發交易核心 | 三個 patch 已完成；實作方與審查方獨立實測均為 99 例通過，已核准合併 |
-| S1-05 之後（期限、API、前端、SignalR 等） | 尚未開始；前端方向待討論 |
+| S1-04 併發交易核心 | 已由 GitHub PR #3 合併（2853cda）；實作方與審查方獨立實測均為 99 例通過 |
+| S1-05 期限邊界 | 新增 21 個真 DB 案例，完整 120 例通過，待獨立 review；無產品程式變更 |
+| S2 之後（API、前端、SignalR 等） | 尚未開始；前端方向待討論 |
 
 階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
@@ -81,3 +82,4 @@ dotnet test Pasto.slnx --configuration Release --no-restore
 - [S1-02 完成報告與維護導讀](docs/s1-02-maintenance-report.md)
 - [S1-03 建房流程與驗證](docs/s1-03-room-creation.md)
 - [S1-04 交易拆分與 Patch 1 驗證](docs/s1-04-item-transactions.md)
+- [S1-05 期限邊界與 S1 驗證對照](docs/s1-05-expiry-boundaries.md)
