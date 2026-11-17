@@ -232,4 +232,4 @@ HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻�
 
 之後依需求 AC-01～AC-15 測安全與 1,000 連線、熱房、同 NAT、300 筆×8 KiB、重連風暴／補償流量，量測方案 A 整份快照的查詢／傳輸放大及熱房收斂。硬體、候選 p95、每秒 20 次平衡新增／刪除仍待實測。達瓶頸先調查詢、限制、通知合併及單實例資源；需要時才另評估局部同步、多實例 SignalR backplane／託管服務，不重採 ADR 0001 的共同權限模型。
 
-2026-11-17：S1 已由 PR #4 合併至 main `781470a`。S2-01 已接 POST /api/rooms 與共用錯誤／限流／代理／no-store／pool 設定，完整 158 例測試通過、待獨立 review。joinUrl 固定相對路徑；REST／Hub 的共用 Credential 驗證器、Join／me 與 metadata／關房 HTTP 依 S2-02／03 接續。沒有 schema／Migration 或產品套件變更，尚無 UI／SignalR／壓測。詳細決策見 [S2 工作項](s2-api-identity.md)。
+2026-11-17：S1 已合併。S2-01 的日誌修正保留於 58e7926；S2-02 已有公開 Join、共用 IParticipantVerifier、Bearer handler 自訂 challenge、me，以及憑證查詢前／驗證後的讀取防護，完整 188 例通過、待獨立 review。Join 在 code row lock 內 COUNT Participant，上限 1000，保留原內容版本。metadata／關房 HTTP 留 S2-03，Hub 共用驗證器留 S5。本輪沒有 schema／Migration 或套件變更；尚未合併 S2，沒有 UI／SignalR／壓測。詳細決策見 [S2 工作項](s2-api-identity.md)。

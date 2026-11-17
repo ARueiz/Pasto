@@ -1,6 +1,6 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-17，S2-01 建房 API。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試透過 WebApplicationFactory 載入實際 Program，已有建房 API，尚無前端或 SignalR。
+更新：2026-11-17，S2-02 加入／匿名身分。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試載入實際 Program，已有建房／加入／me API，尚無前端或 SignalR。
 
 ## 1. 環境與相依
 
@@ -45,7 +45,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 158 個測試，完整通過（114 個真 DB 案例、33 個不連 DB 的 HTTP／host 案例、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 188 個測試，完整通過（135 個真 DB 案例、42 個不連 DB 的 HTTP／host 案例、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
@@ -57,7 +57,8 @@ dotnet format Pasto.slnx --no-restore --verify-no-changes
 | ItemDeletionTests（24 例） | 刪自己的文字、房主不能刪他人、檢查順序、跨房／不存在、同筆／不同筆併發、新增與刪除交錯、滿房容量釋放、鎖逾時／取消、提交前後故障 |
 | RoomClosureTests（22 例） | Creator 關房與優先檢查、保留統計／原期限／冷卻碼、併發關房輸方不可用、關房與新增／刪除兩種順序、關房回滾後新增成功、逾時／取消與提交前後故障 |
 | RoomExpiryTests（21 例） | 三條路徑的到期前一微秒／相等／後一微秒、DeletedAt；真實等鎖後到期拒絕，驗證不能用交易起始時間 |
-| RoomApiTests（38 例） | 正式建房 HTTP、偽造 Host、DI／啟動選項、pool 脫敏、共用錯誤表與日誌、代理／限流／429、commit 前後取消或故障 |
+| RoomApiTests（39 例） | 正式建房 HTTP、偽造 Host、DI／啟動選項、pool 脫敏、錯誤表與日誌分級、真 PG provider 錯誤脫敏、代理／限流／429、提交前後取消或故障 |
+| ParticipantApiTests（29 例） | Join 正規化／後端身分、Bearer challenge body、跨房錯誤順序、me 恢復、憑證查詢前與驗證後限流、1000 人競爭、等鎖後失效、提交前後故障 |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
@@ -217,3 +218,15 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - 新增真 PostgreSQL 房碼衝突的 provider 日誌驗證；原 14 個錯誤案例亦斷言日誌等級，500 診斷與敏感 sentinel 不洩漏。相關 HTTP／host 測試 39 passed，TRX 為 s2-01-review-verified.trx。
 - 首次 Build 因 using 插入位置錯誤遇 CS1529，修正後 0 warning／0 error；首次隨後執行的 no-build 結果仍是舊 38 例（s2-01-review.trx），不視為修正後證據。
 - S2-02 會驗證 challenge body 的 ParticipantUnauthorized，不能僅檢查狀態碼。S2-01 未經使用者核准不合併／推送；審查方獨立實測仍可針對此增量提交進行。
+
+### S2-02 驗證紀錄
+
+- S2-01 日誌修正保留提交 `58e7926`（相關 39 例通過，未合併）。S2-02 的分支為 feature/s2-02-join-identity，由此基準建立，沒有 schema／Migration 或套件變更。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error；`dotnet format Pasto.slnx --no-restore --verify-no-changes`、`git diff --check`：通過。
+- 首輪 `--filter FullyQualifiedName~ParticipantApiTests`：25 passed／0 failed／0 skipped（s2-02-related.trx）。補上跨 IP 全站讀取 admission、驗證器故障、Join 等鎖後關房／到期後，完整執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s2-02-full.trx"`：188 passed／0 failed／0 skipped，含全部 29 個新案例。
+- 999 人的前置資料全經正式 JoinRoom，沒有測試專用 Participant 寫入邏輯；兩個 HTTP host 以 pg_blocking_pids 證明競爭，只有一個加入成功，總數 1000，輸方與後續第 1001 人均 409，內容版本不變。
+- Join 等鎖後關房使用正式 CloseRoom；等鎖後到期用持鎖 fixture 調整 DB 時間並斷言等待方 xact_start 早於 ExpiresAt，正式 Join 仍被拒絕。commit 前取消回滾、commit 後故障保留 Participant，不自動重送。
+- 401 的狀態、ParticipantUnauthorized、correlationId、WWW-Authenticate、no-store 均經真 HTTP pipeline 檢查；跨房的 recovery Store 被替換成不應呼叫的 sentinel，證明拒絕發生在讀目標房之前。相同房間失效回 404，驗證器仍辨識到原身分。
+- 憑證前 IP／全站 admission 用計數驗證器測呼叫次數；不宣稱這組計數 spy 是 DB 查詢效能證據。實際 hash／身分查詢另由真 DB Join／me 案例覆蓋。
+- TRX 位於忽略的 TestResults；本輪 S2-02 Build／測試無失敗，測試後 0 個殘留 schema。這是實作方結果，S2-02 尚待獨立 review；審查方未獨立重跑 S2-01／02。
+- 尚未提供 metadata／關房 HTTP（S2-03）、文字 API／讀寫限流（S3）、Hub／重連（S5）、清理／分層防護／負載測試。沒有公開部署。

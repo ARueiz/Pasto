@@ -28,7 +28,7 @@ public sealed class ApiFailureMiddleware(RequestDelegate next, ILogger<ApiFailur
                 ItemOwnershipException => (403, "ItemDeleteForbidden"),
                 ParticipantLimitReachedException => (409, "ParticipantLimitReached"),
                 RoomItemLimitReachedException => (409, "RoomItemLimitReached"),
-                InvalidItemContentException => (400, "InvalidRequest"),
+                InvalidItemContentException or InvalidRoomCodeException => (400, "InvalidRequest"),
                 BadHttpRequestException bad => (bad.StatusCode, bad.StatusCode == 413 ? "RequestBodyTooLarge" : "InvalidRequest"),
                 RoomBusyException or RoomCodeAllocationException or OperationCanceledException => (503, "ServiceUnavailable"),
                 _ when storageFailures.IsStorageFailure(exception) => (503, "ServiceUnavailable"),

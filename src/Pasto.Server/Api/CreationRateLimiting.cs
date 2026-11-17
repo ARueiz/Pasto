@@ -9,29 +9,41 @@ internal static class CreationRateLimiting
     public static void Configure(RateLimiterOptions options, ApiOptions settings)
     {
         options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
-            PartitionedRateLimiter.Create<HttpContext, string>(context => IsCreation(context)
-                ? RateLimitPartition.GetTokenBucketLimiter(IpKey(context), _ => Bucket(settings.CreatePerIp))
+            PartitionedRateLimiter.Create<HttpContext, string>(context => Profile(context, settings) is { } profile
+                ? RateLimitPartition.GetTokenBucketLimiter($"{profile.Key}:{IpKey(context)}", _ => Bucket(profile.PerIp))
                 : RateLimitPartition.GetNoLimiter("other")),
-            PartitionedRateLimiter.Create<HttpContext, string>(context => IsCreation(context)
-                ? RateLimitPartition.GetTokenBucketLimiter("create-global", _ => Bucket(settings.CreateGlobal))
+            PartitionedRateLimiter.Create<HttpContext, string>(context => Profile(context, settings) is { } profile
+                ? RateLimitPartition.GetTokenBucketLimiter(profile.Key, _ => Bucket(profile.Global))
                 : RateLimitPartition.GetNoLimiter("other")));
         options.OnRejected = async (rejection, _) =>
         {
-            var seconds = rejection.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
-                ? Math.Max(1, Math.Ceiling(retryAfter.TotalSeconds))
-                : Math.Max(settings.CreatePerIp.PeriodSeconds, settings.CreateGlobal.PeriodSeconds);
-            rejection.HttpContext.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-            await ApiProblem.WriteAsync(rejection.HttpContext, 429, "RateLimited");
+            var profile = Profile(rejection.HttpContext, settings);
+            await RejectAsync(rejection.HttpContext, rejection.Lease,
+                profile is null ? 60 : Math.Max(profile.Value.PerIp.PeriodSeconds, profile.Value.Global.PeriodSeconds));
         };
     }
 
-    private static bool IsCreation(HttpContext context)
-        => context.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == RoomCreationEndpoint.Name;
+    private static (string Key, BucketOptions PerIp, BucketOptions Global)? Profile(HttpContext context, ApiOptions settings)
+        => context.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName switch
+        {
+            RoomCreationEndpoint.Name => ("create", settings.CreatePerIp, settings.CreateGlobal),
+            ParticipantEndpoints.JoinName => ("join", settings.JoinPerIp, settings.JoinGlobal),
+            ParticipantEndpoints.MeName => ("read", settings.ReadPerIp, settings.ReadGlobal),
+            _ => null
+        };
+
+    internal static Task RejectAsync(HttpContext context, RateLimitLease lease, int fallbackSeconds)
+    {
+        var seconds = lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+            ? Math.Max(1, Math.Ceiling(retryAfter.TotalSeconds)) : fallbackSeconds;
+        context.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
+        return ApiProblem.WriteAsync(context, 429, "RateLimited");
+    }
 
     private static string IpKey(HttpContext context)
         => context.Connection.RemoteIpAddress?.MapToIPv6().ToString() ?? "unknown";
 
-    private static TokenBucketRateLimiterOptions Bucket(BucketOptions settings) => new()
+    internal static TokenBucketRateLimiterOptions Bucket(BucketOptions settings) => new()
     {
         TokenLimit = settings.TokenLimit,
         TokensPerPeriod = settings.TokensPerPeriod,

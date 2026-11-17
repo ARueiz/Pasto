@@ -11,6 +11,19 @@ internal static class RoomWriteAccess
     public static async Task<(Room Room, DateTime Now)> LockAsync(PastoDbContext context,
         Guid roomId, Guid participantId, CancellationToken cancellationToken)
     {
+        var locked = await LockRoomAsync(context, $"SELECT * FROM rooms WHERE id = {roomId} FOR UPDATE", cancellationToken);
+        if (!await context.Participants.AnyAsync(x => x.RoomId == roomId && x.Id == participantId, cancellationToken))
+            throw new RoomParticipantMismatchException();
+        return locked;
+    }
+
+    public static Task<(Room Room, DateTime Now)> LockByCodeAsync(PastoDbContext context,
+        string code, CancellationToken cancellationToken)
+        => LockRoomAsync(context, $"SELECT * FROM rooms WHERE code = {code} FOR UPDATE", cancellationToken);
+
+    private static async Task<(Room Room, DateTime Now)> LockRoomAsync(PastoDbContext context,
+        FormattableString query, CancellationToken cancellationToken)
+    {
         if (context.Database.CurrentTransaction is null)
             throw new InvalidOperationException("Room write access requires an active transaction.");
 
@@ -19,9 +32,7 @@ internal static class RoomWriteAccess
         List<Room> rooms;
         try
         {
-            rooms = await context.Rooms.FromSqlInterpolated($"""
-                SELECT * FROM rooms WHERE id = {roomId} FOR UPDATE
-                """).ToListAsync(cancellationToken);
+            rooms = await context.Rooms.FromSqlInterpolated(query).ToListAsync(cancellationToken);
         }
         catch (Exception exception) when (exception is PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable }
             or InvalidOperationException { InnerException: PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable } })
@@ -37,10 +48,6 @@ internal static class RoomWriteAccess
             """).SingleAsync(cancellationToken);
         if (!RoomRules.IsAvailable(room, now))
             throw new RoomUnavailableException();
-
-        // 檢查順序：有效性 → Participant 同房 → 呼叫端處理操作權限／容量。
-        if (!await context.Participants.AnyAsync(x => x.RoomId == roomId && x.Id == participantId, cancellationToken))
-            throw new RoomParticipantMismatchException();
 
         return (room, now);
     }

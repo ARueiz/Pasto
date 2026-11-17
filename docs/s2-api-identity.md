@@ -1,6 +1,6 @@
 # S2：房間 API 與匿名身分
 
-基準 main `781470a`。依使用者核准，新增 Microsoft.AspNetCore.Mvc.Testing 測試相依；metadata API 歸 S2，S3 沿用並加入文字 API／快照，不另建平行入口。每個 patch 測試後交獨立 review；本次只做 S2-01，不推送或合併。
+基準 main `781470a`。依使用者核准，新增 Microsoft.AspNetCore.Mvc.Testing 測試相依；metadata API 歸 S2，S3 沿用並加入文字 API／快照，不另建平行入口。每個 patch 測試後交獨立 review；目前已進入 S2-02，不推送或合併。
 
 ## 已固定的決策
 
@@ -53,6 +53,8 @@ API pool 以 host 擁有的 singleton NpgsqlDataSource 共用，host 結束時�
 
 S2-01 經 Claude 靜態審查，P0～P2 為 0、P3 為 1，未獨立重跑測試；日誌分級已修正，真 PG 房碼衝突測試另證明 EF provider 確實記錄 Error 且不含房碼／回傳憑證。S2-02 的 AuthenticationHandler 必須覆寫 HandleChallengeAsync，自行輸出 ParticipantUnauthorized 與 WWW-Authenticate，避免 StatusCodePages 補成 InvalidRequest。
 
+日誌修正與該測試保留在 S2-01 分支提交 `58e7926`，供審查方獨立實測；S2-02 從此基準建立堆疊分支 `feature/s2-02-join-identity`。不代表 S2-01 已合併或已由審查方重跑。
+
 ## S2-01 驗證（2026-11-17）
 
 - 新增 Microsoft.AspNetCore.Mvc.Testing 10.0.13，與本機 ASP.NET Core runtime 對齊；產品專案未新增套件，測試 lock file 已更新且 locked restore 通過。
@@ -63,3 +65,25 @@ S2-01 經 Claude 靜態審查，P0～P2 為 0、P3 為 1，未獨立重跑測試
 - 真 DB 案例驗證 commit 前取消完整回滾，以及已 commit 後注入 DB 故障／取消回 503、三筆建房資料仍存在且只提交一次。後者是明確的提交後同步點，不宣稱模擬全部網路 COMMIT／cancel 競爭或 client 真正斷線。
 - Release Build 0 warning／0 error，格式與差異檢查通過；完整 158 passed／0 failed／0 skipped，測試後 0 個殘留 schema。命令與 TRX 見 testing.md。
 - S2-01 待獨立 review；尚未提供 Join、Credential 驗證器／AuthenticationHandler、me／metadata、關房 HTTP、後續限流與 SignalR。這些依 S2-02／03、S3／S5 交付，不宣稱本 patch 完成整個 S2。
+
+## S2-02 交付與限流配置
+
+- 已提供 POST /api/rooms/join 與 GET /api/rooms/{roomId}/me，沒有新增套件／schema／Migration。JoinRequest 只接受 code，ParticipantId／Creator 由後端決定；joinUrl／Location 仍為相對路徑。
+- Join 使用共用 RoomWriteAccess 的依 code 鎖房入口，與原依 id 寫入入口共用鎖後時鐘／有效性。原入口仍檢查同房 Participant，未放寬新增／刪除／關房授權。COUNT(*) 在鎖內，房主計入 1000 人上限；只插 Participant，不更新內容版本或統計。
+- Application 的 IParticipantVerifier 由 Infrastructure 實作：先驗固定 22 字元 Base64URL 格式，再對原始字串 SHA-256 查 hash，只回內部 ID，不判斷房間有效性。AuthenticationHandler 只在受保護 endpoint 認證，不讓公開或不存在的 endpoint 因多餘的 Authorization header 查 DB；REST 不接受 query token。
+- Handler 自訂 HandleChallengeAsync，輸出 401 ParticipantUnauthorized＋WWW-Authenticate: Bearer；有效但跨房在調用 recovery Store 前回相同 401，無法判斷目標房間存在與否。同房有效憑證遇過期／關房則由 use case 回 404；驗證器仍可辨識身分。Worker 未來刪掉 Participant 後，舊 Credential 自然變成無效 401。
+- /me 使用短唯讀 REPEATABLE READ snapshot 與 DB 時間驗有效性，不產生新 Participant，不回傳憑證。關房發生在讀取檢查點後的在途回應仍可能完成，沿用架構的快照語意，不承諾撤回已取得資料。
+
+| Api 設定前綴 | TokenLimit／TokensPerPeriod／PeriodSeconds |
+| --- | --- |
+| JoinPerIp | 20／120／60 |
+| JoinGlobal | 60／30／1 |
+| ReadPerIp | 1000／30000／60 |
+| ReadGlobal | 2000／60000／60（新增的保守全站候選值，未經壓測） |
+| ReadPerParticipant | 40／240／60 |
+
+建房／加入／讀取使用不同配額鍵。UseRateLimiter 在 Authentication 前先套命名 endpoint 的 IP／全站 bucket，避免無效憑證無限查 DB；/me 在成功驗證與同房檢查後，再用驗證後 Participant ID 套讀取 quota。所有拒絕均 429＋Retry-After＋no-store。S2-03 metadata 需接入同一 read admission 與 Participant quota，不能另開未受保護的入口。
+
+S2-02 新增 29 例（20 真 DB、9 HTTP／host 無 DB），完整 188 passed／0 failed／0 skipped，含 S2-01 修正後 39 例與 S1 的 120 例。特別驗證 challenge body 不被 StatusCodePages 改成 InvalidRequest、跨房先拒絕、不重建身分、保留原內容版本、查憑證前限流、999 人競爭、第 1001 人 409、等鎖後關房／到期、提交前後取消／故障。
+
+完整測試後 0 個殘留 schema；S2-02 尚待獨立 review，沒有推送／合併，不開始 S2-03。分散猜碼、partition 硬上限及負載證據留 S7／S8；S4 靜態資源接入時再將 no-store 限縮到 API 範圍，當前 host 只有 API。

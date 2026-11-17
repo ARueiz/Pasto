@@ -51,6 +51,16 @@ builder.Services.AddRateLimiter(_ => { });
 builder.Services.AddOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>()
     .Configure<IOptions<ApiOptions>>((options, api) => CreationRateLimiting.Configure(options, api.Value));
 builder.Services.AddSingleton<IStorageFailureClassifier, StorageFailureClassifier>();
+builder.Services.AddScoped<IRoomJoinStore, RoomJoinStore>();
+builder.Services.AddScoped<JoinRoom>();
+builder.Services.AddScoped<IParticipantVerifier, ParticipantVerifier>();
+builder.Services.AddScoped<IParticipantRecoveryStore, ParticipantRecoveryStore>();
+builder.Services.AddScoped<GetParticipant>();
+builder.Services.AddSingleton<ParticipantReadLimiter>();
+builder.Services.AddAuthentication(ParticipantAuthenticationHandler.SchemeName)
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ParticipantAuthenticationHandler>(
+        ParticipantAuthenticationHandler.SchemeName, _ => { });
+builder.Services.AddAuthorization();
 builder.Services.AddOptions<CreateRoomOptions>()
     .Bind(builder.Configuration.GetSection("RoomCreation"))
     .Validate(options => options.MaxCodeAttempts is >= 1 and <= 20, "MaxCodeAttempts must be between 1 and 20.")
@@ -72,7 +82,10 @@ app.UseStatusCodePages(status => ApiProblem.WriteAsync(status.HttpContext,
 app.UseForwardedHeaders();
 app.UseRouting();
 app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapRoomCreation();
+app.MapParticipants();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
 
