@@ -1,6 +1,6 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-17，S1-05 期限邊界。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom／AddItem／DeleteOwnItem／CloseRoom，尚無產品 API、前端或 SignalR。
+更新：2026-11-17，S2-01 建房 API。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試透過 WebApplicationFactory 載入實際 Program，已有建房 API，尚無前端或 SignalR。
 
 ## 1. 環境與相依
 
@@ -12,6 +12,7 @@
 | EF Core／Relational／Design | 10.0.4，Design 為工具相依且 PrivateAssets=all |
 | dotnet-ef | 10.0.4，本機工具，見 dotnet-tools.json |
 | Microsoft.NET.Test.Sdk／xunit／runner | 18.0.1／2.9.3／3.1.5 |
+| Microsoft.AspNetCore.Mvc.Testing | 10.0.13，僅測試相依，與本機 ASP.NET Core runtime 對齊 |
 
 兩個專案都有 `packages.lock.json`；測試透過 ProjectReference 使用正式 provider，不再維護測試用 DbContext 或 DDL。未新增 Testcontainers、SQLite、InMemory 或通用 Repository。
 
@@ -44,7 +45,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 120 個測試，完整通過（109 個真 DB 案例、10 個文字輸入或預先取消測試、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 158 個測試，完整通過（114 個真 DB 案例、33 個不連 DB 的 HTTP／host 案例、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
@@ -56,6 +57,7 @@ dotnet format Pasto.slnx --no-restore --verify-no-changes
 | ItemDeletionTests（24 例） | 刪自己的文字、房主不能刪他人、檢查順序、跨房／不存在、同筆／不同筆併發、新增與刪除交錯、滿房容量釋放、鎖逾時／取消、提交前後故障 |
 | RoomClosureTests（22 例） | Creator 關房與優先檢查、保留統計／原期限／冷卻碼、併發關房輸方不可用、關房與新增／刪除兩種順序、關房回滾後新增成功、逾時／取消與提交前後故障 |
 | RoomExpiryTests（21 例） | 三條路徑的到期前一微秒／相等／後一微秒、DeletedAt；真實等鎖後到期拒絕，驗證不能用交易起始時間 |
+| RoomApiTests（38 例） | 正式建房 HTTP、偽造 Host、DI／啟動選項、pool 脫敏、共用錯誤表與日誌、代理／限流／429、commit 前後取消或故障 |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
@@ -77,7 +79,7 @@ dotnet ef migrations script --project src/Pasto.Server --output src/Pasto.Server
 # dotnet ef database update --project src/Pasto.Server
 ```
 
-手動 update 使用連線預設 schema，與測試的 GUID schema 分開；測試不需要先跑 update。正式 host 也使用 `ConnectionStrings__Pasto`，啟動時不自動 Migrate。S1-03 仍無 endpoint，啟動後所有路徑為 404。建房設定與編碼規則見 [S1-03 導讀](s1-03-room-creation.md)。
+手動 update 使用連線預設 schema，與測試的 GUID schema 分開；測試不需要先跑 update。正式 host 也使用 `ConnectionStrings__Pasto`，啟動時不自動 Migrate。S2-01 已有 POST /api/rooms，其餘產品 endpoint 尚未提供。建房核心見 [S1-03 導讀](s1-03-room-creation.md)，HTTP 設定見 [S2 工作項](s2-api-identity.md)。
 
 EF 能追蹤的 CHECK／部分索引保留在 mapping 與 snapshot，初始 Migration 依 ADR 0003 以明確 SQL 建立；DEFERRABLE 不在 EF 模型內，日後任何重建這兩條 FK 的 Migration 都須手動保留並跑 catalog 測試。歷史 Migration 不引用目前 Domain 常數，避免規則變更影響舊 DDL。
 
@@ -195,3 +197,16 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - TRX 位於忽略的本機 TestResults；本輪 Build／測試無失敗，S1-05 待獨立 review，未宣稱審查方已重跑。
 - 完整測試後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：0 個 schema，無測試殘留。
 - 未開始 S2；Join、HTTP／host DI、SignalR、Worker／保留碼回收與壓測仍依後續階段處理。
+
+### S2-01 驗證紀錄（2026-11-17）
+
+- 基準 main `781470a`，分支 `feature/s2-01-create-room-api`。使用者核准 Microsoft.AspNetCore.Mvc.Testing 相依及 metadata API 歸 S2；開工前五項決策記錄於 [S2 工作項](s2-api-identity.md)。本次只交付 S2-01。
+- 新增測試套件 10.0.13 與 test lock file；首次沙箱還原遇 NU1301（網路權限不足），取得權限後正常還原，未停用 audit。
+- `dotnet restore Pasto.slnx --locked-mode`：通過。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error。
+- `dotnet format Pasto.slnx --no-restore --verify-no-changes`、`git diff --check`：通過。
+- 初次 smoke：2 passed；擴充 HTTP／host 測試：36 passed；再補 429 body 與 commit 前取消測試後完整執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s2-01-full.trx"`：158 passed／0 failed／0 skipped。
+- 本輪新增 38 例（5 個真 DB、33 個 HTTP／host 無 DB）；使用實際 Program 的註冊與 middleware，只為故障／限流情境替換 Store 或注入 EF interceptor。並非另一套測試用 DI 或寫入 helper。
+- 真 DB 的提交後取消／故障案例保留已 commit 的三筆資料，回 503 且沒有 Retry-After，不自動重送；提交前取消完整回滾。這不宣稱真實網路競爭或 client 已斷線後仍能送達回應。
+- 本輪 Build／測試無失敗；TRX：s2-01-api-smoke.trx、s2-01-api-first.trx、s2-01-full.trx，位於忽略的 TestResults。完整測試後隔離 schema 查詢：0 個。
+- 尚待獨立 review，未宣稱審查方已重跑。Join／身分驗證、me／metadata／關房 HTTP、後續限流及 SignalR／Worker／壓測仍未執行。

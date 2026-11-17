@@ -1,6 +1,6 @@
 # Pasto — Sprint 1 分階段實作計畫
 
-日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1-01～S1-04 已合併；S1-05 已補齊測試、待獨立 review；S2 與後續尚未實作**（2026-11-17）。S1-04 的 GitHub merge 為 `2853cda`，已有正式 host／持久層、Migration 與建房／新增／刪自己的文字／關房交易；S1-05 完整 120 例測試通過，尚無產品 endpoint。實測見 [testing.md](testing.md)。先前的 UI Prototype 已移除，S4 前端待重新討論。
+日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1 已合併（S1-05 為 PR #4，781470a）；S2-01 已實作與測試，待獨立 review；S2-02／03 與後續尚未開始**（2026-11-17）。已有正式交易核心與公開建房 API，完整 158 例測試通過。S2 固定決策與拆分見 [S2 工作項](s2-api-identity.md)，實測見 [testing.md](testing.md)。S4 前端方向仍待討論。
 
 依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。ADR 0001 僅供歷史比較，不是實作來源。
 
@@ -56,9 +56,11 @@ S1-01 已採 EF Core／PostgreSQL provider、xUnit 與 VSTest runner，固定版
 
 S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／非法 MaxCodeAttempts 與 ValidateOnStart，以及 commit 期間取消的結果不確定語意；不得只複製註冊程式到測試。
 
+使用者已核准測試相依與 metadata API 歸 S2，開工前五項決策見 [S2 工作項](s2-api-identity.md)。S2-01 已交付 POST /api/rooms、每 IP／全站限流、可信代理、no-store／錯誤對應、受限且脫敏的 pool 與實際 host 測試。S2-02 加入／身分恢復，S2-03 metadata／關房；/me 與 metadata 的讀取限流納入 S2，且憑證查 DB 前有粗保護。各 patch 完成後獨立 review，本次不開始 S2-02。
+
 ## 4. S3：文字 CRUD、容量及整份快照列表
 
-交付分三段：新增／刪自己的文字 → metadata → 整份快照列表（ADR 0003）。新增 8 KiB 與 JSON Body 32 KiB 分別驗證、300 筆鎖內檢查、TotalBytes 只統計；已驗證新增／刪除限流；API 不接受 Owner／Creator 欄位。不加分頁、游標或單筆同步 API。
+交付新增／刪自己的文字與整份快照列表（ADR 0003），沿用 S2 的 metadata API。新增 8 KiB 與 JSON Body 32 KiB 分別驗證、300 筆鎖內檢查、TotalBytes 只統計；已驗證新增／刪除限流；API 不接受 Owner／Creator 欄位。不加分頁、游標或單筆同步 API。
 
 驗收：
 
@@ -134,8 +136,8 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 10. 下一個實作任務與完成回報
 
-S1-04 已由 GitHub PR #3 合併為 `2853cda`。本機 main 已 pull，`feature/s1-05-expiry-boundaries` 亦快轉至同一基準。**目前交付點為 S1-05 的獨立 review**：新增正式三條寫入路徑的精確期限／DeletedAt 與真實等鎖後到期測試，不改產品程式或 schema；S1 出口條件對照見 [S1-05](s1-05-expiry-boundaries.md)。核准前不開始 S2，後續 API／匿名授權的具體方案仍須依 AGENTS.md 確認；沒有授權時不合併或推送。
+S1 已合併，S2-01 使用 `feature/s2-01-create-room-api`，基準 main `781470a`。**目前交付點為 S2-01 的獨立 review**；固定語意、設定、HTTP 錯誤表與後續範圍見 [S2 工作項](s2-api-identity.md)。這次沒有 schema／Migration 或產品套件變更；新增核准的 ASP.NET Core 測試相依。核准前不開始 S2-02，沒有授權時不合併或推送。
 
-每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完整 120 個測試通過，S1-05 尚待獨立 review，不代表完整 MVP 已完成。
+每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完整 158 個測試通過，S2-01 尚待獨立 review，不代表整個 S2 或完整 MVP 已完成。
 
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。

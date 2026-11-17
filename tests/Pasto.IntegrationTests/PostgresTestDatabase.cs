@@ -31,6 +31,8 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     }
 
     public string SchemaName => schemaName;
+    // 僅供同組件的 WebApplicationFactory 注入隔離連線；不寫入日誌／測試輸出。
+    public string ConnectionString => connectionString;
     public string ServerVersion { get; private set; } = "";
 
     public static async Task<PostgresTestDatabase> CreateAsync()

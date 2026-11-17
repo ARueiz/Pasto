@@ -6,7 +6,7 @@
 
 ## 目前狀態
 
-**開發中，已建立正式持久層、Application 建房、新增／刪自己文字與關房交易，尚無產品 API 或前端。**
+**開發中，已有正式交易核心與建房 API；加入／身分驗證、其餘 API、前端與即時同步尚未完成。**
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -15,8 +15,9 @@
 | S1-02 正式持久層骨架 | 已完成（正式 Migration；共 6 個整合測試通過） |
 | S1-03 正式建房與 Owner／cascade | 已由 PR #2 合併至 main（1ad0e2b） |
 | S1-04 併發交易核心 | 已由 GitHub PR #3 合併（2853cda）；實作方與審查方獨立實測均為 99 例通過 |
-| S1-05 期限邊界 | 新增 21 個真 DB 案例，完整 120 例通過，待獨立 review；無產品程式變更 |
-| S2 之後（API、前端、SignalR 等） | 尚未開始；前端方向待討論 |
+| S1-05 期限邊界 | 已由 PR #4 合併（781470a）；完整 120 例通過 |
+| S2-01 建房 API | 已實作公開建房、限流／代理／錯誤處理與 host 測試，完整 158 例通過；待獨立 review |
+| S2-02／03 與後續 | 尚未開始；前端方向待討論 |
 
 階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
@@ -83,3 +84,4 @@ dotnet test Pasto.slnx --configuration Release --no-restore
 - [S1-03 建房流程與驗證](docs/s1-03-room-creation.md)
 - [S1-04 交易拆分與 Patch 1 驗證](docs/s1-04-item-transactions.md)
 - [S1-05 期限邊界與 S1 驗證對照](docs/s1-05-expiry-boundaries.md)
+- [S2 API／匿名身分工作項與 S2-01 設定](docs/s2-api-identity.md)

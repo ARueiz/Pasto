@@ -1,4 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Options;
+using Npgsql;
+using Pasto.Server.Api;
 using Pasto.Server.Application.Items;
 using Pasto.Server.Application.Rooms;
 using Pasto.Server.Infrastructure.Persistence;
@@ -15,7 +19,38 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 // Factory 讓每次建房嘗試擁有自己的 context；也會註冊 scoped PastoDbContext 供後續 use case 使用。
-builder.Services.AddDbContextFactory<PastoDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddOptions<DatabaseOptions>().BindConfiguration("Database")
+    .Validate(options => options.MaxPoolSize is >= 1 and <= 256, "MaxPoolSize must be between 1 and 256.").ValidateOnStart();
+builder.Services.AddSingleton<NpgsqlDataSource>(services =>
+{
+    var settings = services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
+    var connection = new NpgsqlConnectionStringBuilder(connectionString)
+    {
+        MaxPoolSize = settings.MaxPoolSize,
+        MinPoolSize = 0,
+        Pooling = true,
+        IncludeErrorDetail = false,
+        LogParameters = false
+    };
+    return NpgsqlDataSource.Create(connection.ConnectionString);
+});
+builder.Services.AddDbContextFactory<PastoDbContext>((services, options) =>
+    options.UseNpgsql(services.GetRequiredService<NpgsqlDataSource>()));
+builder.Services.AddOptions<ApiOptions>().BindConfiguration("Api")
+    .Validate(options => options.IsValid(), "API rate limits and trusted proxy IP addresses must be valid.").ValidateOnStart();
+builder.Services.AddOptions<ForwardedHeadersOptions>().Configure<IOptions<ApiOptions>>((options, api) =>
+{
+    options.KnownProxies.Clear();
+    options.KnownIPNetworks.Clear();
+    options.ForwardedHeaders = api.Value.TrustedProxies.Length == 0 ? ForwardedHeaders.None
+        : ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+    foreach (var proxy in api.Value.TrustedProxies) options.KnownProxies.Add(System.Net.IPAddress.Parse(proxy));
+});
+builder.Services.AddRateLimiter(_ => { });
+builder.Services.AddOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>()
+    .Configure<IOptions<ApiOptions>>((options, api) => CreationRateLimiting.Configure(options, api.Value));
+builder.Services.AddSingleton<IStorageFailureClassifier, StorageFailureClassifier>();
 builder.Services.AddOptions<CreateRoomOptions>()
     .Bind(builder.Configuration.GetSection("RoomCreation"))
     .Validate(options => options.MaxCodeAttempts is >= 1 and <= 20, "MaxCodeAttempts must be between 1 and 20.")
@@ -31,6 +66,15 @@ builder.Services.AddScoped<IRoomClosureStore, RoomClosureStore>();
 builder.Services.AddScoped<CloseRoom>();
 
 var app = builder.Build();
-// S1-04 已可由 Application 建房／新增／刪自己的文字／關房，尚無產品 endpoint；所有路徑目前回 404。
+app.UseMiddleware<ApiFailureMiddleware>();
+app.UseStatusCodePages(status => ApiProblem.WriteAsync(status.HttpContext,
+    status.HttpContext.Response.StatusCode, "InvalidRequest"));
+app.UseForwardedHeaders();
+app.UseRouting();
+app.UseRateLimiter();
+app.MapRoomCreation();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
+
+// WebApplicationFactory 載入實際 Program 與 DI／middleware。
+public partial class Program;
