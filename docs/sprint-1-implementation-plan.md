@@ -1,6 +1,6 @@
 # Pasto — Sprint 1 分階段實作計畫
 
-日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1-01～S1-03 已合併；S1-04 Patch 1 已實作與測試，待使用者獨立 review；Patch 2／3 與後續尚未開始**（2026-11-16）。已有正式 host／持久層、初始 Migration、Application 建房與新增文字交易，全專案 51 個測試通過，尚無產品 endpoint；實測與執行方式見 [testing.md](testing.md)。先前的 UI Prototype 已移除，S4 前端待重新討論。
+日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1-01～S1-03 已合併；S1-04 Patch 1 已完成 review 與 F1 修正，Patch 2 已實作與測試、待獨立 review；Patch 3 與後續尚未開始**（2026-11-17）。已有正式 host／持久層、初始 Migration、Application 建房與新增／刪除自己的文字交易，完整 77 個測試通過，尚無產品 endpoint；實測與執行方式見 [testing.md](testing.md)。先前的 UI Prototype 已移除，S4 前端待重新討論。
 
 依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。ADR 0001 僅供歷史比較，不是實作來源。
 
@@ -134,8 +134,8 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 10. 下一個實作任務與完成回報
 
-S1-01～S1-03 已合併；S1-03 的 PR #2 merge commit 為 `1ad0e2b`。S1-04 使用 `feature/s1-04-item-transactions`，Patch 1 新增文字已完成實作與測試，**目前交付點是使用者對 Patch 1 的獨立 review**；處理 findings 後才進 Patch 2 刪除，再 review，最後 Patch 3 關房與 review。每個 patch 一個 commit，不自行合併或推送。開工前固定的輸入契約、Unicode、檢查順序、鎖後時間、鎖逾時與取消語意見 [S1-04 工作項](s1-04-item-transactions.md)。
+S1-01～S1-03 已合併；S1-03 的 PR #2 merge commit 為 `1ad0e2b`。S1-04 使用 `feature/s1-04-item-transactions`，Patch 1 與 F1 修正分別為 `6612d06`、`09d277f`，均經 Claude 靜態審查。**目前交付點是 Patch 2 的獨立 review**，通過並處理 findings 後才開始 Patch 3 關房。每個主要 patch 各一個 commit，已核准的 review 增量另行提交，不改寫歷史、不自行合併或推送。固定語意與 F2 最小抽取見 [S1-04 工作項](s1-04-item-transactions.md)。
 
-每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前全專案 51 個測試通過，不代表 S1 全階段或完整 MVP 已完成。
+每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完整 77 個測試通過，不代表 S1 全階段或完整 MVP 已完成。
 
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。

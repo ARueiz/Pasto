@@ -2,7 +2,7 @@
 
 本階段分為新增、刪除、關房三個 patch，沿用現有 schema／Migration，不新增套件。
 從已 pull 的 main `1ad0e2b`（PR #2 合併結果）建立 `feature/s1-04-item-transactions`。
-每個 patch 測試後交使用者獨立 review，處理 findings 才進下一個；每個 patch 一個 commit，不自行合併或推送。
+每個 patch 測試後交付獨立 review，處理 findings 並獲使用者確認才進下一個；每個主要 patch 各一個 commit，已核准的 review 增量另行提交，不改寫歷史、不自行合併或推送。
 
 ## 開工前固定的語意
 
@@ -15,17 +15,17 @@
 - commit 前故障／取消須完整回滾；commit 期間故障／取消結果可能不確定，不能宣稱必然回滾，也不得自動重送。測試以明確 commit 後注入點證明可能已提交，不宣稱模擬真實網路競爭。
 - 299 筆與 200×8 KiB 前置資料由正式 AddItem use case 建立，測試不另寫新增商業邏輯。故障／非法資料注入只用測試 interceptor 或明確 fixture；FK 最後防線保留獨立測試。
 
-## Patch 1：新增文字（本次範圍）
+## Patch 1：新增文字（已交付）
 
 - 正式 AddItem／ItemAdditionStore 與 DI；同房查詢、鎖內 300 筆上限、Owner 後端決定。
 - 文字插入、ItemCount／TotalBytes／Version、CreatedVersion 原子提交。
 - 測試原文／UTF-8／非法 Unicode、299 筆搶最後一格、一般併發、200×8 KiB、權限檢查順序、不存在／已失效房間、鎖逾時、故障／取消及 commit 後例外。
 - 真 PostgreSQL、獨立 context／連線與同步點；驗證實際計數、bytes、版本與無部分寫入。
-- Build、格式、相關及完整回歸測試後交使用者 review；本次不開始 Patch 2。
+- Build、格式、相關及完整回歸測試後交付獨立 review；已由 Claude 審查並獲使用者確認進入 Patch 2。
 
 ## Patch 2：刪除自己的文字
 
-- 先做 F2 最小抽取：8192／300 與房間有效性判斷歸 Domain；設逾時 → 鎖 Room → 另取 clock_timestamp → 驗證有效性的流程由 Infrastructure 內部方法共用，沿用 RoomBusyException，不建立通用 Repository。歷史 Migration 保持原常數，不引用目前 Domain。
+- F2 最小抽取已完成：Domain RoomRules 定義 8192／300 與有效性判斷；Infrastructure 內部 RoomWriteAccess 共用設逾時 → 鎖 Room → 另取 clock_timestamp → 有效性 → 同房檢查。沿用 RoomBusyException，不建立通用 Repository。歷史 Migration 保持原常數，不引用目前 Domain。
 - 鎖內同房／Owner 驗證，房主亦不能刪他人單筆。
 - 同房不存在 changed=false；實際刪除才扣計數／bytes 並加版本。
 - 測重刪競爭、不同筆刪除、新增／刪除交錯、跨房、取消與回滾；獨立 review。
@@ -52,6 +52,16 @@ HTTP／Credential 驗證器、JSON body 32 KiB、SignalR 提交後通知與 Work
 ## Review findings 處置
 
 - F1：本輪修正。房間鎖取得逾時轉 RoomBusyException；真 DB 驗證轉換、未重試及無殘留寫入，新增直接／包裝的非 55P03 故障原樣傳遞測試。捕捉範圍不涵蓋 commit，既有取消與 commit 後例外測試持續通過。
-- F2：已核對並列入 Patch 2 的最小抽取工作；目前只有新增路徑，不提前抽通用機制。
+- F2：Patch 2 已完成最小抽取；RoomUnavailableException、RoomParticipantMismatchException 已移到 Application.Rooms，與 RoomBusyException 一致。
 - F3：記錄為測試穩定性風險，目前未觀察偶發失敗，維持 1.5 秒觀察窗與產品 2 秒鎖逾時。縮短觀察窗只會更早失敗，無法消除 OS 排程延遲；若發生，保留證據再調整同步設計，不以加大產品逾時掩蓋。
 - 等鎖後關房測試留 Patch 3，等鎖後到期測試留 S1-05；Program.cs 的 DI 驗證留 S2。這些尚未執行。
+
+## Patch 2 交付狀態（2026-11-17）
+
+- 基準為已核准 F1 增量的 `09d277f`，沿用同一功能分支。新增 DeleteOwnItem／ItemDeletionStore 與 DI，無 schema／Migration／套件變更。
+- use case 輸入 roomId／participantId／itemId；先鎖房並驗有效性、同房身分，再限定 RoomId＋itemId 查詢。僅 Owner 可刪，Creator 無例外特權；他房 itemId 視為本房不存在，不讀取或改動他房資料。
+- 實際刪除才扣筆數／ContentBytes 並遞增版本，與刪除同交易提交；不存在回 changed=false 與鎖內版本，仍完成短交易，不改統計或版本。成功結果只在 commit 後回傳。
+- 24 個新測試包含房主／一般 Owner、拒刪他人、失效／同房優先順序、跨房／不存在、重刪競爭、不同筆併發刪除、新增／刪除兩種鎖順序、釋放滿房容量、鎖逾時、等待鎖取消、提交前回滾及提交後例外。所有文字與容量資料均經正式 AddItem 建立。
+- 相關新增／刪除測試 53 passed；完整回歸 77 passed／0 failed／0 skipped，補齊 F1 修正後既有 53 例的完整通過證據。Build 0 warning／0 error、格式與差異檢查通過。
+- 待獨立 review；本次尚未執行 Patch 3 關房、S1-05 期限邊界、S2 host DI／HTTP、SignalR 或壓測。
+- F3 觀察窗維持原值，目前未遇偶發失敗。55P03 只轉換鎖房查詢；交易後段其他 DB 例外仍原樣傳遞，S2 需一般 DB 故障的 503／500 對應。

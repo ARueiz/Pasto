@@ -1,4 +1,5 @@
 using System.Text;
+using Pasto.Server.Domain;
 
 namespace Pasto.Server.Application.Items;
 
@@ -33,7 +34,7 @@ public sealed class AddItem(IItemAdditionStore store)
             throw new InvalidItemContentException(ItemContentError.InvalidUnicode);
         }
 
-        if (bytes > 8192)
+        if (bytes > RoomRules.MaxContentBytes)
         {
             throw new InvalidItemContentException(ItemContentError.TooLarge);
         }

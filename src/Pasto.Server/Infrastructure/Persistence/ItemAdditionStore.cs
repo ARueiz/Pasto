@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Pasto.Server.Application.Items;
-using Pasto.Server.Application.Rooms;
 using Pasto.Server.Domain;
 
 namespace Pasto.Server.Infrastructure.Persistence;
@@ -13,46 +11,9 @@ public sealed class ItemAdditionStore(IDbContextFactory<PastoDbContext> contextF
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        // 僅作用於本交易，連線回池後不殘留；2 秒是初始候選值，S8 再依量測調整。
-        await context.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", cancellationToken);
-        List<Room> rooms;
-        try
-        {
-            rooms = await context.Rooms.FromSqlInterpolated($"""
-                SELECT * FROM rooms WHERE id = {roomId} FOR UPDATE
-                """).ToListAsync(cancellationToken);
-        }
-        catch (Exception exception) when (exception is PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable }
-            or InvalidOperationException { InnerException: PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable } })
-        {
-            // 只轉換鎖取得階段的 55P03；取消、其他 DB 故障、commit 結果不確定不能當成忙碌。
-            throw new RoomBusyException(exception);
-        }
-        var room = rooms.SingleOrDefault();
-        if (room is null)
-        {
-            throw new RoomUnavailableException();
-        }
-
-        // 必須在 FOR UPDATE 完成後另發查詢，不在等鎖前計算時間，也不用交易起始時間 now()。
-        var now = await context.Database.SqlQuery<DateTime>($"""
-            SELECT clock_timestamp() AS "Value"
-            """).SingleAsync(cancellationToken);
-        if (room.DeletedAt is not null || room.ExpiresAt <= now)
-        {
-            throw new RoomUnavailableException();
-        }
-
-        // 明確回報應用層失敗；複合 FK 仍為最後防線，而非正常授權流程。
-        if (!await context.Participants.AnyAsync(x => x.RoomId == roomId && x.Id == participantId, cancellationToken))
-        {
-            throw new RoomParticipantMismatchException();
-        }
-
-        if (room.ItemCount >= 300)
-        {
+        var (room, now) = await RoomWriteAccess.LockAsync(context, roomId, participantId, cancellationToken);
+        if (room.ItemCount >= RoomRules.MaxItemCount)
             throw new RoomItemLimitReachedException();
-        }
 
         room.ItemCount++;
         room.TotalBytes = checked(room.TotalBytes + contentBytes);

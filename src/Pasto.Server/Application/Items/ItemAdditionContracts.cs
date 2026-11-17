@@ -18,6 +18,4 @@ public sealed class InvalidItemContentException(ItemContentError error)
     public ItemContentError Error { get; } = error;
 }
 
-public sealed class RoomUnavailableException() : Exception("Room is unavailable.");
-public sealed class RoomParticipantMismatchException() : Exception("Participant does not belong to this room.");
 public sealed class RoomItemLimitReachedException() : Exception("Room item limit was reached.");
