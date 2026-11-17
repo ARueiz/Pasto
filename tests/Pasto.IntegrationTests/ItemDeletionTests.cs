@@ -1,5 +1,3 @@
-using System.Data.Common;
-using System.Diagnostics;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -10,6 +8,7 @@ using Pasto.Server.Domain;
 using Pasto.Server.Infrastructure.Persistence;
 using Pasto.Server.Infrastructure.Security;
 using Xunit;
+using static Pasto.IntegrationTests.TransactionTestHooks;
 
 namespace Pasto.IntegrationTests;
 
@@ -265,7 +264,7 @@ public sealed class ItemDeletionTests
         var room = await CreateRoomAsync(database);
         var item = await AddAsync(database, room, room.ParticipantId, "text");
         using var cancellation = new CancellationTokenSource();
-        var interceptor = new FailAfterSaveInterceptor(cancel ? cancellation : null);
+        var interceptor = new FailOrCancelAfterSaveInterceptor(cancel ? cancellation : null);
         var pending = CreateDelete(database, interceptor).ExecuteAsync(room.RoomId, room.ParticipantId, item.ItemId, cancellation.Token);
         if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
         else await Assert.ThrowsAsync<InjectedFailureException>(() => pending);
@@ -352,98 +351,9 @@ public sealed class ItemDeletionTests
         Assert.All(items, item => Assert.Equal(Encoding.UTF8.GetByteCount(item.Content), item.ContentBytes));
     }
 
-    private static async Task WaitForBlockedBackendAsync(PostgresTestDatabase database, int pid)
-    {
-        await using var context = database.CreateContext();
-        var deadline = Stopwatch.StartNew();
-        while (deadline.Elapsed < TimeSpan.FromSeconds(1.5))
-        {
-            if (await context.Database.SqlQuery<bool>($"SELECT cardinality(pg_blocking_pids({pid})) > 0 AS \"Value\"").SingleAsync())
-                return;
-            await Task.Delay(10); // 輪詢實際 DB 等鎖狀態，不以延遲猜測競爭已發生。
-        }
-        Assert.Fail("Second connection did not enter a PostgreSQL lock wait.");
-    }
-
     private sealed class UnexpectedStore : IItemDeletionStore
     {
         public Task<ItemDeletionResult> DeleteOwnAsync(Guid roomId, Guid participantId, Guid itemId, CancellationToken cancellationToken)
             => throw new InvalidOperationException("Canceled input must not reach persistence.");
-    }
-    private sealed class InjectedFailureException : Exception;
-
-    private sealed class HoldAfterSaveInterceptor : SaveChangesInterceptor
-    {
-        public TaskCompletionSource Saved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public override async ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
-        {
-            Saved.TrySetResult();
-            await Release.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
-            return result;
-        }
-    }
-    private sealed class LockAttemptInterceptor : DbCommandInterceptor
-    {
-        public int Attempts { get; private set; }
-        public TaskCompletionSource<int> Attempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
-            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
-        {
-            if (command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
-            {
-                Attempts++;
-                Attempted.TrySetResult(((NpgsqlConnection)command.Connection!).ProcessID);
-            }
-            return ValueTask.FromResult(result);
-        }
-    }
-    private sealed class BeforeLockBarrierInterceptor(int participants) : DbCommandInterceptor
-    {
-        private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int arrivals;
-        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
-            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
-        {
-            if (command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
-            {
-                if (Interlocked.Increment(ref arrivals) == participants) ready.TrySetResult();
-                await ready.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
-            }
-            return result;
-        }
-    }
-    private sealed class FailAfterSaveInterceptor(CancellationTokenSource? cancellation) : SaveChangesInterceptor
-    {
-        public int Saves { get; private set; }
-        public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
-        {
-            Saves++;
-            cancellation?.Cancel();
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new InjectedFailureException();
-        }
-    }
-    private sealed class FailBeforeCommitInterceptor : DbTransactionInterceptor
-    {
-        public bool ReachedCommit { get; private set; }
-        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction, TransactionEventData eventData,
-            InterceptionResult result, CancellationToken cancellationToken = default)
-        {
-            ReachedCommit = true;
-            throw new InjectedFailureException();
-        }
-    }
-    private sealed class FailAfterCommitInterceptor(CancellationTokenSource? cancellation) : DbTransactionInterceptor
-    {
-        public int Commits { get; private set; }
-        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
-        {
-            // 明確已提交後注入取消／故障，不宣稱模擬真實 COMMIT 網路競爭。
-            Commits++;
-            cancellation?.Cancel();
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new InjectedFailureException();
-        }
     }
 }

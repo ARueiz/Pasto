@@ -54,7 +54,7 @@ HTTP／Credential 驗證器、JSON body 32 KiB、SignalR 提交後通知與 Work
 - F1：本輪修正。房間鎖取得逾時轉 RoomBusyException；真 DB 驗證轉換、未重試及無殘留寫入，新增直接／包裝的非 55P03 故障原樣傳遞測試。捕捉範圍不涵蓋 commit，既有取消與 commit 後例外測試持續通過。
 - F2：Patch 2 已完成最小抽取；RoomUnavailableException、RoomParticipantMismatchException 已移到 Application.Rooms，與 RoomBusyException 一致。
 - F3：記錄為測試穩定性風險，目前未觀察偶發失敗，維持 1.5 秒觀察窗與產品 2 秒鎖逾時。縮短觀察窗只會更早失敗，無法消除 OS 排程延遲；若發生，保留證據再調整同步設計，不以加大產品逾時掩蓋。
-- 等鎖後關房測試留 Patch 3，等鎖後到期測試留 S1-05；Program.cs 的 DI 驗證留 S2。這些尚未執行。
+- 等鎖後關房測試已在 Patch 3 執行；等鎖後到期測試留 S1-05，Program.cs 的 DI 驗證留 S2，後兩者尚未執行。
 
 ## Patch 2 交付狀態（2026-11-17）
 
@@ -65,3 +65,17 @@ HTTP／Credential 驗證器、JSON body 32 KiB、SignalR 提交後通知與 Work
 - 相關新增／刪除測試 53 passed；完整回歸 77 passed／0 failed／0 skipped，補齊 F1 修正後既有 53 例的完整通過證據。Build 0 warning／0 error、格式與差異檢查通過。
 - 待獨立 review；本次尚未執行 Patch 3 關房、S1-05 期限邊界、S2 host DI／HTTP、SignalR 或壓測。
 - F3 觀察窗維持原值，目前未遇偶發失敗。55P03 只轉換鎖房查詢；交易後段其他 DB 例外仍原樣傳遞，S2 需一般 DB 故障的 503／500 對應。
+
+## Patch 2 審查結果
+
+Review Agent（Claude）對 `09d277f..c060864` 僅做靜態審查，P0～P2 為 0、P3 為 1；未獨立執行 Build／測試。使用者提供的審查結論允許開始 Patch 3。P3 指出新增／刪除測試的同步與故障注入工具重複，本次已移至 TransactionTestHooks。
+
+## Patch 3 交付狀態（2026-11-17）
+
+- 基準 `c060864`，沿用同一分支；CloseRoom／RoomClosureStore 與 DI 已實作，無 schema／Migration／套件變更。
+- 關房沿用 RoomWriteAccess：有效性 → Participant 同房 → Creator；以鎖後 DB 時間設定 DeletedAt、Version 加一，同交易提交。只更新這兩欄，不實體刪除，不更動統計、ExpiresAt 或保留碼期限。
+- 重複／併發關房的輸方回 RoomUnavailable；非房主遇已關房間也先回不可用。成功結果只在 commit 後回傳，commit 結果不確定仍不自動重送。
+- 新增 22 例（21 個真 DB、1 個預先取消）：基本與跨房權限、失效優先順序、併發關房、關房先取得鎖時新增／刪除／非房主關房被拒絕、寫入先取得鎖則完成後再關房、關房回滾後等待新增成功、逾時／取消與提交前後故障。競爭先觀察 pg_blocking_pids，再放行持鎖交易。
+- TransactionTestHooks 原樣集中觀察窗、鎖嘗試／barrier、SaveChanges 與 commit 故障工具；全部狀態仍屬每例建立的 instance。原兩份 AfterSave 在沒有取消來源時是否檢查 token 略有不同，保留兩個型別，避免搬移改變行為；原測試斷言不變。
+- 關房相關 22 passed，完整 99 passed／0 failed／0 skipped；Build 0 warning／0 error，格式／差異檢查通過。本 patch 待獨立 review，不宣稱已由 Claude 審查。
+- 尚未執行 S1-05 的精確期限／等待鎖後到期邊界、S2 host DI／HTTP、SignalR、Worker 或壓測；2 秒鎖逾時與 1.5 秒觀察窗的 F3 風險保留。

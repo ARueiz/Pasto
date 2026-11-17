@@ -27,8 +27,10 @@ builder.Services.AddScoped<IItemAdditionStore, ItemAdditionStore>();
 builder.Services.AddScoped<AddItem>();
 builder.Services.AddScoped<IItemDeletionStore, ItemDeletionStore>();
 builder.Services.AddScoped<DeleteOwnItem>();
+builder.Services.AddScoped<IRoomClosureStore, RoomClosureStore>();
+builder.Services.AddScoped<CloseRoom>();
 
 var app = builder.Build();
-// S1-04 Patch 2 已可由 Application 建房／新增／刪自己的文字，尚無產品 endpoint；所有路徑目前回 404。
+// S1-04 已可由 Application 建房／新增／刪自己的文字／關房，尚無產品 endpoint；所有路徑目前回 404。
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();

@@ -1,6 +1,6 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-17，S1-04 Patch 2。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom／AddItem／DeleteOwnItem，尚無產品 API、前端或 SignalR。
+更新：2026-11-17，S1-04 Patch 3。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom／AddItem／DeleteOwnItem／CloseRoom，尚無產品 API、前端或 SignalR。
 
 ## 1. 環境與相依
 
@@ -44,7 +44,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 77 個測試，完整通過（67 個真 DB 案例、9 個新增／刪除文字輸入或預先取消測試、1 個憑證／房碼生成測試）。本輪補齊 F1 修正後既有 53 例與 Patch 2 新增 24 例的完整回歸證據。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 99 個測試，完整通過（88 個真 DB 案例、10 個文字輸入或預先取消測試、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
@@ -54,6 +54,7 @@ dotnet format Pasto.slnx --no-restore --verify-no-changes
 | RoomSecretsTests（1 例） | 六碼格式、128-bit 原始隨機值的 Base64URL 格式與 SHA-256 編碼一致性，不以抽樣宣稱密碼學強度 |
 | ItemAdditionTests（29 例） | 文字驗證、同房／容量／失效檢查、一般參與者、真 DB 鎖競爭與取消／逾時、統計／版本、提交前回滾及提交後例外、非 55P03 故障不轉忙碌；見 S1-04 工作項 |
 | ItemDeletionTests（24 例） | 刪自己的文字、房主不能刪他人、檢查順序、跨房／不存在、同筆／不同筆併發、新增與刪除交錯、滿房容量釋放、鎖逾時／取消、提交前後故障 |
+| RoomClosureTests（22 例） | Creator 關房與優先檢查、保留統計／原期限／冷卻碼、併發關房輸方不可用、關房與新增／刪除兩種順序、關房回滾後新增成功、逾時／取消與提交前後故障 |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
@@ -158,3 +159,15 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - TRX 留在忽略的本機 TestResults；本輪 Build／測試無失敗。尚待獨立 review，不宣稱 Claude 已審查 Patch 2。
 - 完整測試後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：0 個 schema，無測試殘留。
 - 關房競爭、精確期限邊界、host DI／HTTP、SignalR、負載測試仍依後續階段進行；未在本輪執行。
+
+### S1-04 Patch 3 驗證紀錄（2026-11-17）
+
+- 基準 `c060864`。Claude 對 Patch 2 僅靜態審查：P0～P2 共 0、P3 共 1；未重跑 Build／測試。P3 的重複工具已原樣搬到 TransactionTestHooks，觀察窗與注入點未改變；兩份 AfterSave 的 token 檢查差異保留為兩個型別。產品新增 CloseRoom／RoomClosureStore 與 DI，無 schema／套件變更。
+- `dotnet build Pasto.slnx -c Release --no-restore`：通過，0 warning／0 error。
+- `dotnet format Pasto.slnx --no-restore --verify-no-changes`、`git diff --check`：通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter FullyQualifiedName~RoomClosureTests --logger "trx;LogFileName=s1-04-patch3-related.trx"`：22 passed／0 failed／0 skipped。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s1-04-patch3-full.trx"`：99 passed／0 failed／0 skipped，包含共用工具搬移後原新增／刪除斷言的回歸驗證。
+- 新增案例 21 個真 DB、1 個預先取消；文字均經正式 AddItem，身分 fixture 僅準備尚無 Join use case 的 Participant。等待鎖後關房拒絕與反向寫入先成功的測試均由 pg_blocking_pids 證實競爭；close 回滾再由等待新增提交，驗證 DeletedAt／Version 未殘留。
+- TRX 位於忽略的本機 TestResults；本輪 Build／測試無失敗，Patch 3 尚待獨立 review。
+- 完整測試後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：0 個 schema，無測試殘留。
+- 未執行精確等於期限／等待鎖後到期的 S1-05 邊界、host DI／HTTP、SignalR、Worker、負載測試，仍依既定後續階段處理。
