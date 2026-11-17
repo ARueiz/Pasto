@@ -9,6 +9,8 @@ using Pasto.Server.Infrastructure.Persistence;
 using Pasto.Server.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+// 在 JSON 綁定／字串配置前由 Kestrel 限制實際 body bytes，包含未知長度的串流。
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 32 * 1024);
 
 // 連線由環境變數 ConnectionStrings__Pasto 或 .NET configuration 提供；不在 repo 保存密碼。
 // Compose 的 .env 只供 Compose 使用，不會自動匯入 ASP.NET Core 的設定。
@@ -78,7 +80,8 @@ builder.Services.AddScoped<CloseRoom>();
 var app = builder.Build();
 app.UseMiddleware<ApiFailureMiddleware>();
 app.UseStatusCodePages(status => ApiProblem.WriteAsync(status.HttpContext,
-    status.HttpContext.Response.StatusCode, "InvalidRequest"));
+    status.HttpContext.Response.StatusCode,
+    status.HttpContext.Response.StatusCode == 413 ? "RequestBodyTooLarge" : "InvalidRequest"));
 app.UseForwardedHeaders();
 app.UseRouting();
 app.UseRateLimiter();

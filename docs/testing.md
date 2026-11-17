@@ -1,6 +1,6 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-17，S2-02 加入／匿名身分。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試載入實際 Program，已有建房／加入／me API，尚無前端或 SignalR。
+更新：2026-11-18，S2-02 審查修正。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試載入實際 Program，body 上限另用真 Kestrel／loopback TCP 驗證。
 
 ## 1. 環境與相依
 
@@ -45,7 +45,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 188 個測試，完整通過（135 個真 DB 案例、42 個不連 DB 的 HTTP／host 案例、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 195 個測試，完整通過（135 個真 DB 案例、49 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
@@ -59,6 +59,7 @@ dotnet format Pasto.slnx --no-restore --verify-no-changes
 | RoomExpiryTests（21 例） | 三條路徑的到期前一微秒／相等／後一微秒、DeletedAt；真實等鎖後到期拒絕，驗證不能用交易起始時間 |
 | RoomApiTests（39 例） | 正式建房 HTTP、偽造 Host、DI／啟動選項、pool 脫敏、錯誤表與日誌分級、真 PG provider 錯誤脫敏、代理／限流／429、提交前後取消或故障 |
 | ParticipantApiTests（29 例） | Join 正規化／後端身分、Bearer challenge body、跨房錯誤順序、me 恢復、憑證查詢前與驗證後限流、1000 人競爭、等鎖後失效、提交前後故障 |
+| RequestBodyLimitTests（7 例） | 真 Kestrel 的 32 KiB body 設定與 Content-Length／chunked 實際拒絕；413 code、no-store、未呼叫 Join Store |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
@@ -230,3 +231,13 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - 憑證前 IP／全站 admission 用計數驗證器測呼叫次數；不宣稱這組計數 spy 是 DB 查詢效能證據。實際 hash／身分查詢另由真 DB Join／me 案例覆蓋。
 - TRX 位於忽略的 TestResults；本輪 S2-02 Build／測試無失敗，測試後 0 個殘留 schema。這是實作方結果，S2-02 尚待獨立 review；審查方未獨立重跑 S2-01／02。
 - 尚未提供 metadata／關房 HTTP（S2-03）、文字 API／讀寫限流（S3）、Hub／重連（S5）、清理／分層防護／負載測試。沒有公開部署。
+
+### S2-02 審查修正（2026-11-18）
+
+- Claude 僅靜態審查，兩項 P2；未重跑測試。Finding 1 設定 Kestrel MaxRequestBodySize=32768，並修正 StatusCodePages 對 413 的 code。Finding 2 使用者選 (a) 維持 quota，風險與公開部署前必要工作已寫入 S2／S7，不宣稱已緩解。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error；格式與差異檢查通過。
+- 真 Kestrel 首輪測試 4 passed／2 failed（s2-02-body-limit.trx）：錯誤假設 chunked 在 JSON bytes 未超限時一定通過。核對 ASP.NET Core 10.0.13 原始碼確認 Kestrel 會計入分塊控制位元組；保留安全上限，明確記錄較保守的 chunked 行為，並保留對應拒絕案例、增加較小 chunked 可通過的案例。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter FullyQualifiedName~RequestBodyLimitTests --logger "trx;LogFileName=s2-02-body-limit-verified.trx"`：7 passed／0 failed／0 skipped。真 TCP 只監聽 loopback 動態埠，沒有新增套件或 TestServer 假設。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s2-02-review-full.trx"`：195 passed／0 failed／0 skipped。
+- TRX 保留在忽略的 TestResults；修正增量仍待獨立 review，不將這次執行說成 Claude 的獨立實測。未開始 S2-03、S7 防護或 S8 壓測。
+- 完整測試後唯讀查詢隔離 schema：0 個，沒有測試殘留。

@@ -87,3 +87,25 @@ S2-01 經 Claude 靜態審查，P0～P2 為 0、P3 為 1，未獨立重跑測試
 S2-02 新增 29 例（20 真 DB、9 HTTP／host 無 DB），完整 188 passed／0 failed／0 skipped，含 S2-01 修正後 39 例與 S1 的 120 例。特別驗證 challenge body 不被 StatusCodePages 改成 InvalidRequest、跨房先拒絕、不重建身分、保留原內容版本、查憑證前限流、999 人競爭、第 1001 人 409、等鎖後關房／到期、提交前後取消／故障。
 
 完整測試後 0 個殘留 schema；S2-02 尚待獨立 review，沒有推送／合併，不開始 S2-03。分散猜碼、partition 硬上限及負載證據留 S7／S8；S4 靜態資源接入時再將 no-store 限縮到 API 範圍，當前 host 只有 API。
+
+## S2-02 審查修正與風險決策（2026-11-18）
+
+Claude 對 `a614f61..58e7926` 與 `58e7926..a6f465b` 僅做靜態審查，沒有重跑測試；S2-01 日誌修正正確，S2-02 有兩項 P2，無 P0／P1。本輪針對這兩項處理，不開始 S2-03。
+
+### Finding 1：JSON body 上限
+
+Program 將 Kestrel 全域 MaxRequestBodySize 固定為 32768 bytes，在 JSON 反序列化配置大字串之前擋下超限讀取。Minimal API binder 可能自行設定 413，未拋到 ApiFailureMiddleware，因此 StatusCodePages 的 413 也要輸出 RequestBodyTooLarge，不能沿用 InvalidRequest。
+
+新增 RequestBodyLimitTests，使用既有 WebApplicationFactory 的 UseKestrel，監聽 loopback 動態埠，透過真 TCP／HTTP 1.1 測試，沒有新增套件。Content-Length 的 32767／32768 bytes 可進入格式驗證（測試用 code=bad，回 400），32769 bytes 回 413；chunked 測試另涵蓋小 body 與接近／超過上限的拒絕。全部驗證 no-store、ProblemDetails code／correlationId，以及不觸發 Join Store。
+
+**HTTP/1.1 chunked 的限制較保守**：Kestrel 10.0.13 將 chunk framing 也計入上限，接近 32 KiB 的 JSON 即可能回 413；本輪不調高原生安全上限，也不保證所有傳輸編碼都能容納恰好 32768 bytes 的 JSON。依據：[版本對應的 Kestrel 原始碼](https://github.com/dotnet/aspnetcore/blob/v10.0.13/src/Servers/Kestrel/Core/src/Internal/Http/Http1ChunkedEncodingMessageBody.cs)。
+
+### Finding 2：採用方案 (a)，維持配置並接受已知風險
+
+使用者明確選擇維持 ReadPerIp／ReadGlobal 設定；本輪沒有修改任何 quota。每 IP 名目持續配額為全站 50%，burst 也為 50%，少數來源（含多個 IPv6 位址）可用格式正確的無效憑證耗盡全站讀取配額，使合法 me／後續 metadata 與快照重新同步回 429。這項可用性風險仍存在，記錄不代表已緩解。
+
+目前允許的範圍僅為隔離本機 MVP 驗證，S7 公開部署前必須處理並驗證：無效憑證／分散來源壓力下的合法讀取與重連預算、全站與 NAT 配額取捨、驗證前 admission／失敗壓力模式、bounded partition 與資源監控；S8 補上負載證據，不以任意調高 DB 保護桶宣稱解決。
+
+另一項既有設計風險亦列入 S7：持有分享連結者可持續 Join 耗盡 1000 個生命週期名額，讓其他人無法加入。Participant 上限是資料預算，不是濫用防護；公開部署前需濫用測試與取捨確認，不能自行刪除被內容引用的 Participant 釋放名額。
+
+修正後 Build 0 warning／0 error，Kestrel 相關測試 7 passed，完整 195 passed／0 failed／0 skipped；格式檢查通過。失敗分析、TRX 與獨立審查界線見 testing.md。

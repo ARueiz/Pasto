@@ -1,6 +1,6 @@
 # Pasto — Sprint 1 分階段實作計畫
 
-日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1 已合併；S2-01 已靜態審查並修正日誌，S2-02 已實作與測試、待獨立 review；S2-03 與後續尚未開始**（2026-11-17）。已有交易核心與建房／加入／Bearer／me API，完整 188 例測試通過。S2 固定決策見 [S2 工作項](s2-api-identity.md)，實測見 [testing.md](testing.md)。S2-01／02 尚未合併；S4 前端方向仍待討論。
+日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1 已合併；S2-01 已靜態審查並修正日誌，S2-02 已靜態審查並補上 body 限制，增量待 review；S2-03 與後續尚未開始**（2026-11-18）。已有建房／加入／Bearer／me API，完整 195 例測試通過。S2 決策見 [S2 工作項](s2-api-identity.md)，實測見 [testing.md](testing.md)。讀取 quota 依使用者選擇維持，風險仍在並列入 S7；S2-01／02 未合併。
 
 依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。ADR 0001 僅供歷史比較，不是實作來源。
 
@@ -111,6 +111,8 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 驗收：
 
 - AC-13／AC-15：多來源猜碼、連續錯碼、NAT 合法使用者、偽造 X-Forwarded-For、無效 Credential 及直接 Hub invocation 有預期防護，429／Retry-After、503 明確。
+- S2-02 使用者已選擇維持讀取配額：單一 IP 可用掉全站 50%，少數來源可耗盡驗證前讀取配額，影響合法 me／metadata／快照同步。這是仍未緩解的可用性風險；公開部署前必須處理並驗證合法重連／讀取預算、失敗壓力模式與全站／NAT 取捨，再由 S8 提供負載證據。
+- 分享連結持有者可反覆 Join 耗盡 1000 個生命週期名額。公開部署前需做濫用測試、提出防護與資料預算取捨，不將 Participant 上限當成防濫用保證，也不能刪被文字引用的 Participant 來繞過預算。
 - partition／失敗記錄達上限仍有界，新鍵不直接放行；通知／Client dirty／伺服器連線追蹤不因輸入數量無界成長。
 - 高負載先限制建／加入，讀、刪、清理仍有預算；全站連線足夠容納目標千人，同 IP 不被過小連線額度卡住；DB pool 合計與 max_connections 有餘裕。
 - 不引入全站 DB 配額列，不用 Room.TotalBytes 拒絕總量；監控資源與查 SQL／鎖等待，確認每次寫入不爭用額外全站列。
@@ -138,6 +140,6 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 S1 已合併。S2-01 審查增量保留於 `feature/s2-01-create-room-api` 的 `58e7926`，S2-02 由此建立 `feature/s2-02-join-identity`。**目前交付點為 S2-02 的獨立 review**；S2-01 仍可先針對 58e7926 獨立完整實測，不因堆疊分支而宣稱已合併。固定語意、設定與錯誤表見 [S2 工作項](s2-api-identity.md)。S2-02 沒有 schema／Migration 或套件變更，核准前不開始 S2-03，沒有授權時不合併或推送。
 
-每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完整 188 個測試通過，S2-02 尚待獨立 review，不代表整個 S2 或完整 MVP 已完成。
+每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完整 195 個測試通過，S2-02 審查修正增量仍待 review，不代表整個 S2 或完整 MVP 已完成。
 
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。
