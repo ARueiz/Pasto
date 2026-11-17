@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Pasto.Server.Application.Items;
 using Pasto.Server.Application.Rooms;
 
@@ -33,8 +34,13 @@ public sealed class ApiFailureMiddleware(RequestDelegate next, ILogger<ApiFailur
                 _ when storageFailures.IsStorageFailure(exception) => (503, "ServiceUnavailable"),
                 _ => (500, "InternalError")
             };
-            // 不記錄例外物件／訊息、房碼、憑證或正文；保留安全 code 與追蹤識別碼。
-            logger.LogError("Request failed with {ErrorCode}; trace {CorrelationId}.", code, ApiProblem.CorrelationId(context));
+            // 不傳入例外物件／訊息。500 只從實際 frames 取診斷，不採可覆寫的 StackTrace 字串。
+            if (status >= 500 && status != 503)
+                logger.LogError("Request failed with {ErrorCode}; trace {CorrelationId}; type {ExceptionType}; frames {StackFrames}.",
+                    code, ApiProblem.CorrelationId(context), exception.GetType().FullName, new StackTrace(exception, false).ToString());
+            else
+                logger.Log(status == 503 ? LogLevel.Warning : LogLevel.Information,
+                    "Request failed with {ErrorCode}; trace {CorrelationId}.", code, ApiProblem.CorrelationId(context));
             context.Response.Clear();
             context.Response.Headers.CacheControl = "no-store";
             if (status == 401) context.Response.Headers.WWWAuthenticate = "Bearer";

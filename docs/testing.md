@@ -210,3 +210,10 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - 真 DB 的提交後取消／故障案例保留已 commit 的三筆資料，回 503 且沒有 Retry-After，不自動重送；提交前取消完整回滾。這不宣稱真實網路競爭或 client 已斷線後仍能送達回應。
 - 本輪 Build／測試無失敗；TRX：s2-01-api-smoke.trx、s2-01-api-first.trx、s2-01-full.trx，位於忽略的 TestResults。完整測試後隔離 schema 查詢：0 個。
 - 尚待獨立 review，未宣稱審查方已重跑。Join／身分驗證、me／metadata／關房 HTTP、後續限流及 SignalR／Worker／壓測仍未執行。
+
+### S2-01 審查增量
+
+- Claude 靜態審查 `781470a..a614f61`：P0～P2 共 0、P3 共 1，未重跑 Build／測試。日誌改為 4xx Information、503 Warning、500 Error；500 保留例外型別與無檔案路徑的實際 frames，不記訊息。
+- 新增真 PostgreSQL 房碼衝突的 provider 日誌驗證；原 14 個錯誤案例亦斷言日誌等級，500 診斷與敏感 sentinel 不洩漏。相關 HTTP／host 測試 39 passed，TRX 為 s2-01-review-verified.trx。
+- 首次 Build 因 using 插入位置錯誤遇 CS1529，修正後 0 warning／0 error；首次隨後執行的 no-build 結果仍是舊 38 例（s2-01-review.trx），不視為修正後證據。
+- S2-02 會驗證 challenge body 的 ParticipantUnauthorized，不能僅檢查狀態碼。S2-01 未經使用者核准不合併／推送；審查方獨立實測仍可針對此增量提交進行。

@@ -171,6 +171,38 @@ public sealed class RoomApiTests
         Assert.DoesNotContain(SensitiveSentinel, logs.Text);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Contains(body.RootElement.GetProperty("correlationId").GetString()!, logs.Text);
+        var entry = Assert.Single(logs.Entries, entry => entry.Category == typeof(ApiFailureMiddleware).FullName);
+        Assert.Equal(status == 500 ? LogLevel.Error : status == 503 ? LogLevel.Warning : LogLevel.Information, entry.Level);
+        if (status == 500)
+        {
+            Assert.Contains(failure.GetType().FullName!, entry.Text);
+            Assert.Contains(nameof(RejectingStore.TryCreateAsync), entry.Text);
+            Assert.DoesNotContain(".cs:line", entry.Text);
+        }
+    }
+
+    [Fact]
+    public async Task RealPostgresCollision_ProviderErrorLogsDoNotContainCodesOrCredential()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        await TestRoomCreation.Create(database, new SequenceRoomSecrets("TAKEN1")).ExecuteAsync();
+        using var logs = new CapturedLogs();
+        var connection = new NpgsqlConnectionStringBuilder(database.ConnectionString) { IncludeErrorDetail = true, LogParameters = true };
+        await using var factory = new PastoApiFactory(connection.ConnectionString, configureServices: services =>
+        {
+            services.RemoveAll<IRoomSecrets>();
+            services.AddSingleton<IRoomSecrets>(new SequenceRoomSecrets("TAKEN1", "FRESH1"));
+        }, logs: logs);
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsync("/api/rooms", null);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var credential = body.RootElement.GetProperty("credential").GetString()!;
+        Assert.Contains(logs.Entries, entry => entry.Category.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal)
+            && entry.Level == LogLevel.Error);
+        Assert.DoesNotContain("TAKEN1", logs.Text);
+        Assert.DoesNotContain("FRESH1", logs.Text);
+        Assert.DoesNotContain(credential, logs.Text);
     }
 
     [Theory]
@@ -389,17 +421,18 @@ public sealed class RoomApiTests
 
     private sealed class CapturedLogs : ILoggerProvider
     {
-        private readonly ConcurrentQueue<string> entries = new();
-        public string Text => string.Join('\n', entries);
-        public ILogger CreateLogger(string categoryName) => new Capture(entries);
+        private readonly ConcurrentQueue<(string Category, LogLevel Level, string Text)> entries = new();
+        public IEnumerable<(string Category, LogLevel Level, string Text)> Entries => entries;
+        public string Text => string.Join('\n', entries.Select(entry => entry.Text));
+        public ILogger CreateLogger(string categoryName) => new Capture(categoryName, entries);
         public void Dispose() { }
-        private sealed class Capture(ConcurrentQueue<string> entries) : ILogger
+        private sealed class Capture(string category, ConcurrentQueue<(string Category, LogLevel Level, string Text)> entries) : ILogger
         {
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
             public bool IsEnabled(LogLevel logLevel) => true;
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter)
-                => entries.Enqueue(formatter(state, exception) + (exception?.ToString() ?? ""));
+                => entries.Enqueue((category, logLevel, formatter(state, exception) + (exception?.ToString() ?? "")));
         }
     }
 }

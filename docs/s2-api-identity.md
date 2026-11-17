@@ -49,7 +49,9 @@ Bucket token／補充量允許 1～100000、週期 1～86400 秒；QueueLimit=0�
 
 API pool 以 host 擁有的 singleton NpgsqlDataSource 共用，host 結束時釋放；DbContextFactory 仍是 singleton，每次交易建立獨立 context，use case／Store 維持 scoped。API 的 IStorageFailureClassifier 窄介面由 Infrastructure 實作，避免 HTTP 錯誤處理引用 EF／Npgsql；root Program 作 DI 組裝可引用 Infrastructure。
 
-建房不需 request body。201 的 Location 與 joinUrl 均為相對路徑；回應 Credential 的 DTO 不使用 record，避免自動 ToString 暴露秘密。未知路由／方法也回 ProblemDetails；錯誤與日誌共用 correlationId。日誌只記安全錯誤碼及 correlationId，不輸出例外物件／訊息；未啟用 HttpLogging 或 EF sensitive logging。
+建房不需 request body。201 的 Location 與 joinUrl 均為相對路徑；回應 Credential 的 DTO 不使用 record，避免自動 ToString 暴露秘密。未知路由／方法也回 ProblemDetails；錯誤與日誌共用 correlationId。API 4xx 記 Information、503 記 Warning、其他 5xx 記 Error；500 另記例外型別與不含檔案路徑的實際 stack frames，不輸出例外物件／訊息。未啟用 HttpLogging 或 EF sensitive logging。
+
+S2-01 經 Claude 靜態審查，P0～P2 為 0、P3 為 1，未獨立重跑測試；日誌分級已修正，真 PG 房碼衝突測試另證明 EF provider 確實記錄 Error 且不含房碼／回傳憑證。S2-02 的 AuthenticationHandler 必須覆寫 HandleChallengeAsync，自行輸出 ParticipantUnauthorized 與 WWW-Authenticate，避免 StatusCodePages 補成 InvalidRequest。
 
 ## S2-01 驗證（2026-11-17）
 
