@@ -9,7 +9,7 @@
 - use case 輸入為已驗證身分所對應的 `roomId`、`participantId`；S2 憑證驗證器負責取得身分，不讓 HTTP body 指定 Owner。S1-04 仍於鎖內查詢 Participant 同房關係，不能僅靠 FK 拒絕。
 - 格式驗證先行；鎖內的檢查順序固定為房間有效性 → Participant 屬於該房 → 操作權限／容量。
 - 新增拒絕空白、超過 8,192 UTF-8 bytes、NUL（U+0000）及不成對 surrogate；嚴格 UTF-8 編碼，不取代、不截斷、不 trim 原文。NUL／不合法 Unicode 使用 InvalidUnicode 應用錯誤，S2 對應 400。
-- 開短交易、`SET LOCAL lock_timeout = '2s'`、`SELECT ... FOR UPDATE` 鎖 Room，完成後另發 `SELECT clock_timestamp()`。不可用 `now()`，也不把時鐘放在等鎖的 SELECT list。2 秒是候選值，S8 再量測；鎖逾時保留 PostgreSQL 55P03（Npgsql EF 預設策略包在 InvalidOperationException 內），不當成容量／授權失敗、不自動重試，HTTP 映射留 S2。
+- 開短交易、`SET LOCAL lock_timeout = '2s'`、`SELECT ... FOR UPDATE` 鎖 Room，完成後另發 `SELECT clock_timestamp()`。不可用 `now()`，也不把時鐘放在等鎖的 SELECT list。2 秒是候選值，S8 再量測；Infrastructure 只將取得房間鎖時的 PostgreSQL 55P03（直接或由 InvalidOperationException 包住）轉成 Application 的 RoomBusyException，不當成容量／授權失敗、不自動重試。取消、其他 DB 故障及 commit 例外原樣傳遞；HTTP 503 映射留 S2，API 不需引用 Npgsql。
 - 三條路徑統一 Rooms → children 鎖序；文字、統計、Version 在同一交易提交。成功才增加版本；TotalBytes 僅統計，不用來拒絕容量。
 - 已失效房間優先回 RoomUnavailable，無論呼叫者是否為房主。再次／併發關房輸的一方回不可用，不作冪等成功，也不再加版本。
 - commit 前故障／取消須完整回滾；commit 期間故障／取消結果可能不確定，不能宣稱必然回滾，也不得自動重送。測試以明確 commit 後注入點證明可能已提交，不宣稱模擬真實網路競爭。
@@ -25,6 +25,7 @@
 
 ## Patch 2：刪除自己的文字
 
+- 先做 F2 最小抽取：8192／300 與房間有效性判斷歸 Domain；設逾時 → 鎖 Room → 另取 clock_timestamp → 驗證有效性的流程由 Infrastructure 內部方法共用，沿用 RoomBusyException，不建立通用 Repository。歷史 Migration 保持原常數，不引用目前 Domain。
 - 鎖內同房／Owner 驗證，房主亦不能刪他人單筆。
 - 同房不存在 changed=false；實際刪除才扣計數／bytes 並加版本。
 - 測重刪競爭、不同筆刪除、新增／刪除交錯、跨房、取消與回滾；獨立 review。
@@ -42,8 +43,15 @@ HTTP／Credential 驗證器、JSON body 32 KiB、SignalR 提交後通知與 Work
 
 ## Patch 1 交付狀態（2026-11-16）
 
-已實作並完成 Build／格式檢查／完整測試（51 passed，含新增 27 例），待使用者獨立 review。
+初次交付 `6612d06` 已完成 Build／格式檢查／完整測試（51 passed，含新增 27 例）。Review Agent（Claude）本輪僅做獨立靜態審查，P0～P2 為 0、P3 為 3；未獨立重跑測試。審查後 F1 修正的相關測試為 29 passed；Claude 增量靜態審查 No Actionable Findings，使用者已核准提交並開始 Patch 2。
 最後一格競爭測試先暫停第一個已寫入但未提交的交易，再由 `pg_blocking_pids` 證實第二連線已等鎖才放行。
 取消測試分為預先取消、等待鎖取消、SaveChanges 後／commit 前取消，以及明確 commit 後注入取消；不以後者宣稱真實網路競爭已覆蓋。
 既有 Owner FK 正反例持續通過，與新 use case 的同房拒絕測試共同覆蓋兩層防線。
 完整指令、失敗紀錄與範圍限制見 [testing.md](testing.md)。
+
+## Review findings 處置
+
+- F1：本輪修正。房間鎖取得逾時轉 RoomBusyException；真 DB 驗證轉換、未重試及無殘留寫入，新增直接／包裝的非 55P03 故障原樣傳遞測試。捕捉範圍不涵蓋 commit，既有取消與 commit 後例外測試持續通過。
+- F2：已核對並列入 Patch 2 的最小抽取工作；目前只有新增路徑，不提前抽通用機制。
+- F3：記錄為測試穩定性風險，目前未觀察偶發失敗，維持 1.5 秒觀察窗與產品 2 秒鎖逾時。縮短觀察窗只會更早失敗，無法消除 OS 排程延遲；若發生，保留證據再調整同步設計，不以加大產品逾時掩蓋。
+- 等鎖後關房測試留 Patch 3，等鎖後到期測試留 S1-05；Program.cs 的 DI 驗證留 S2。這些尚未執行。

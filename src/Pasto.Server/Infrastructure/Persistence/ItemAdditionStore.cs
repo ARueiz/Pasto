@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Pasto.Server.Application.Items;
+using Pasto.Server.Application.Rooms;
 using Pasto.Server.Domain;
 
 namespace Pasto.Server.Infrastructure.Persistence;
@@ -13,9 +15,19 @@ public sealed class ItemAdditionStore(IDbContextFactory<PastoDbContext> contextF
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         // 僅作用於本交易，連線回池後不殘留；2 秒是初始候選值，S8 再依量測調整。
         await context.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", cancellationToken);
-        var rooms = await context.Rooms.FromSqlInterpolated($"""
-            SELECT * FROM rooms WHERE id = {roomId} FOR UPDATE
-            """).ToListAsync(cancellationToken);
+        List<Room> rooms;
+        try
+        {
+            rooms = await context.Rooms.FromSqlInterpolated($"""
+                SELECT * FROM rooms WHERE id = {roomId} FOR UPDATE
+                """).ToListAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable }
+            or InvalidOperationException { InnerException: PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable } })
+        {
+            // 只轉換鎖取得階段的 55P03；取消、其他 DB 故障、commit 結果不確定不能當成忙碌。
+            throw new RoomBusyException(exception);
+        }
         var room = rooms.SingleOrDefault();
         if (room is null)
         {

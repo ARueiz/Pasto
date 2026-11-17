@@ -212,16 +212,33 @@ public sealed class ItemAdditionTests
             await using var transaction = await blocker.Database.BeginTransactionAsync();
             await blocker.Rooms.FromSqlInterpolated($"SELECT * FROM rooms WHERE id = {room.RoomId} FOR UPDATE").ToListAsync();
             var attempt = new LockAttemptInterceptor();
-            // Npgsql EF 的預設非重試策略會將 transient SQLSTATE 包在 InvalidOperationException。
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            var exception = await Assert.ThrowsAsync<RoomBusyException>(() =>
                 CreateAdd(database, attempt).ExecuteAsync(room.RoomId, room.ParticipantId, "text").WaitAsync(TimeSpan.FromSeconds(8)));
-            Assert.Equal(PostgresErrorCodes.LockNotAvailable, Assert.IsType<PostgresException>(exception.InnerException).SqlState);
+            // 真 DB 證明 Infrastructure 已將 provider 的包裝例外轉成 Application 結果。
+            var providerException = Assert.IsType<InvalidOperationException>(exception.InnerException);
+            Assert.Equal(PostgresErrorCodes.LockNotAvailable, Assert.IsType<PostgresException>(providerException.InnerException).SqlState);
             Assert.Equal(1, attempt.Attempts);
         }
         // 同一房隨後可正常操作，失敗交易未留下鎖或統計。
         await AssertStatisticsAsync(database, room.RoomId, 0, 0, 0);
         await CreateAdd(database).ExecuteAsync(room.RoomId, room.ParticipantId, "ok");
         await AssertStatisticsAsync(database, room.RoomId, 1, 2, 1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OtherLockQueryFailures_AreNotReportedAsRoomBusy(bool wrapped)
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var room = await CreateRoomAsync(database);
+        var postgres = new PostgresException("Injected non-timeout failure.", "ERROR", "ERROR", PostgresErrorCodes.InsufficientPrivilege);
+        Exception failure = wrapped ? new InvalidOperationException("Injected wrapper.", postgres) : postgres;
+        var interceptor = new FailLockQueryInterceptor(failure);
+        var actual = await Record.ExceptionAsync(() => CreateAdd(database, interceptor)
+            .ExecuteAsync(room.RoomId, room.ParticipantId, "text"));
+        Assert.Same(failure, actual);
+        await AssertStatisticsAsync(database, room.RoomId, 0, 0, 0);
     }
 
     [Fact]
@@ -371,6 +388,17 @@ public sealed class ItemAdditionTests
                 Attempts++;
                 Attempted.TrySetResult(((NpgsqlConnection)command.Connection!).ProcessID);
             }
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class FailLockQueryInterceptor(Exception failure) : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
+                throw failure;
             return ValueTask.FromResult(result);
         }
     }
