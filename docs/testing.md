@@ -1,5 +1,18 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S3-01 驗證紀錄（2026-11-18）
+
+新增 ItemWriteApiTests 38 例（34 個真 DB，含 3 個真 Kestrel；4 個不連 DB）。覆蓋原文保留、8192／8193 UTF-8 bytes、空白／NUL／不成對 surrogate、拒絕授權欄位、401／403／404／409、重複刪除、Participant 新增／刪除配額分離、關房共用刪除配額、驗證前粗限流、提交前／後故障與不重試。300 筆前置資料透過正式 AddItem 建立。
+
+- 首次 Build 曾失敗：新測試直接組裝 CreateRoom 時漏帶 logger；已改用既有 TestRoomCreation helper，後續 Release Build 為 0 warning／0 error。
+- 初版相關 32 例通過，TRX：s3-01-related.trx。補齊容量、真 Kestrel 與設定測試後共 38 例。
+- 首次完整套件：265 passed／1 failed／0 skipped，TRX：s3-01-full.trx。失敗為既有 ParticipantApiTests.LastParticipantSlot_TwoHttpRequestsOnlyOneCommits_Then1001stIs409，在正式 Join 前置資料建立時發生 NpgsqlException → SocketException：「一次只能用一個通訊端位址」。
+- 觀察本機對 55432 約 8,600 個 TIME_WAIT，降到約 3,300 後重跑：264 passed／2 failed／0 skipped，TRX：s3-01-full-after-port-release.trx。同一既有測試及新增 FullRoom_Returns409_WithoutChangingCounters 的前置資料建立發生相同 socket 錯誤。未修改正式交易、測試斷言或測試資料建立方式來繞過錯誤。
+- 這是連線建立失敗；TIME_WAIT 壓力是觀察到的環境線索，尚不能僅據此宣稱已確認所有根因。兩次失敗紀錄均保留於測試專案內被忽略的 TestResults 目錄。
+- 後續觀察：沒有其他測試程序同時執行；TIME_WAIT 已降至約 600。以沙箱外環境獨立執行相關測試，38 passed／0 failed／0 skipped，約 10 秒（s3-01-related-isolated.trx）。同環境完整回歸 266 passed／0 failed／0 skipped，約 21 秒（s3-01-full-unrestricted.trx）。測試後殘留 schema 為 0。執行權限與連線壓力均有變化，不能據此單獨認定任一項為唯一根因；沒有修改測試隔離、連線池設定或併發斷言。
+
+執行命令：`dotnet build Pasto.slnx -c Release --no-restore`、`dotnet test Pasto.slnx -c Release --no-build --no-restore --logger 'trx;LogFileName=…'`；初版相關測試另加 `--filter FullyQualifiedName~ItemWriteApiTests`。已執行 dotnet format 及 `--verify-no-changes`。S3-02 快照列表與 S8 壓測尚未執行，S3-01 待獨立 review。以下 S2 紀錄為歷史結果。
+
 S2-03 實測（2026-11-18）：新增 RoomStateApiTests 33 例（29 個真 DB、4 個不連 DB）。涵蓋 metadata 契約與快照一致性、Bearer／同房／權限／有效性順序、兩層共用限流、驗證後被清理的競爭、HTTP 併發關房、commit 前回滾與 commit 後結果不確定。併發關房以 pg_blocking_pids 確認等鎖；既有 HTTP 提交故障 hook 搬至 TransactionTestHooks 共用，未改行為。
 
 本輪實際執行 Release build、相關測試、完整測試、format 與 format verify、git diff --check。Build 0 warning／0 error；相關 33 passed、完整 228 passed，皆 0 failed／0 skipped；測試後 pasto_it_* schema 為 0。測試命令使用 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，相關套件另加 `--filter FullyQualifiedName~RoomStateApiTests`。TRX 分別為 TestResults/s2-03-related.trx 與 s2-03-full.trx（測試專案內，已忽略）。本輪沒有測試失敗；未執行 S8 負載測試，S2-03 尚待獨立 review，不將實作方結果描述為審查方證據。
@@ -49,7 +62,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 228 個測試，完整通過（164 個真 DB 案例、53 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 266 個測試，完整通過（198 個真 DB 案例〔含 3 個真 Kestrel〕、57 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |

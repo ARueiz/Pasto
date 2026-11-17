@@ -32,6 +32,6 @@ public sealed class ItemAdditionStore(IDbContextFactory<PastoDbContext> contextF
         await context.SaveChangesAsync(cancellationToken);
         // commit 期間取消／連線失敗可能已提交，不自動重試；成功結果只能在 commit 後回傳。
         await transaction.CommitAsync(cancellationToken);
-        return new AddedItem(item.Id, room.Version);
+        return new AddedItem(item.Id, room.Version, now);
     }
 }

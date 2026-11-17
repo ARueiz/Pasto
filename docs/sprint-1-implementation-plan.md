@@ -1,6 +1,6 @@
 # Pasto — Sprint 1 分階段實作計畫
 
-日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1 已合併；S2-01 已靜態審查並修正日誌，S2-02 審查 findings 已處理；S2-03 metadata／關房已實作，待獨立 review；S3 尚未開始**（2026-11-18）。已有建房／加入／Bearer／me API，完整 228 例測試通過。S2 決策見 [S2 工作項](s2-api-identity.md)，實測見 [testing.md](testing.md)。讀取 quota 依使用者選擇維持，風險仍在並列入 S7；S2-01／02 未合併。
+日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1 已合併；S2 已經 PR #5 合併（9eace5f）；S3-01 文字寫入／配額已實作，待獨立 review；S3-02 快照列表尚未開始**（2026-11-18）。已有建房／加入／Bearer／me API，完整 266 例測試通過。S2 決策見 [S2 工作項](s2-api-identity.md)，實測見 [testing.md](testing.md)。讀取 quota 依使用者選擇維持，風險仍在並列入 S7；S2 已合併。
 
 依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。ADR 0001 僅供歷史比較，不是實作來源。
 
@@ -56,7 +56,7 @@ S1-01 已採 EF Core／PostgreSQL provider、xUnit 與 VSTest runner，固定版
 
 S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／非法 MaxCodeAttempts 與 ValidateOnStart，以及 commit 期間取消的結果不確定語意；不得只複製註冊程式到測試。
 
-使用者已核准測試相依與 metadata API 歸 S2，開工前五項決策見 [S2 工作項](s2-api-identity.md)。S2-01 已交付建房與必要防護，Claude 靜態審查無 P0～P2，日誌 P3 修正保留於 `58e7926`。S2-02 已交付加入、共用憑證驗證器、AuthenticationHandler 自訂 401 body、me、查憑證前 IP／全站及驗證後 Participant 讀取配額；S2-03 已交 metadata／關房，完整 228 例通過。各 patch 獨立 review，本次不開始 S3；審查方完整實測尚未執行。
+使用者已核准測試相依與 metadata API 歸 S2，開工前五項決策見 [S2 工作項](s2-api-identity.md)。S2-01 已交付建房與必要防護，Claude 靜態審查無 P0～P2，日誌 P3 修正保留於 `58e7926`。S2-02 已交付加入、共用憑證驗證器、AuthenticationHandler 自訂 401 body、me、查憑證前 IP／全站及驗證後 Participant 讀取配額；S2-03 已交 metadata／關房，完整 228 例通過。各 patch 獨立 review，S2 後續由使用者確認測試審查 OK 並合併；S3 計畫見 [S3 工作項](s3-items.md)。
 
 ## 4. S3：文字 CRUD、容量及整份快照列表
 
@@ -138,8 +138,7 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 10. 下一個實作任務與完成回報
 
-S1 已合併。S2-01 審查增量保留於 `feature/s2-01-create-room-api` 的 `58e7926`，S2-02 由此建立 `feature/s2-02-join-identity`。**目前交付點為 S2-03 的獨立 review**；S2-01 仍可先針對 58e7926 獨立完整實測，不因堆疊分支而宣稱已合併。固定語意、設定與錯誤表見 [S2 工作項](s2-api-identity.md)。S2-02 沒有 schema／Migration 或套件變更，S2-03 已由 bc97100 開立 feature/s2-03-room-state-closure，待 review，沒有授權時不合併或推送。
+S1 已合併。S2 已由 PR #5 合併至 main `9eace5f`，使用者已確認測試審查 OK。S3-01 從 main 開立 `feature/s3-01-item-write-api`，接文字新增／刪除與 Participant 寫入配額，包含關房的刪除配額；不改 schema、不加套件。工作項見 [S3 計畫](s3-items.md)。
 
-每個小 patch 回報：改哪些檔／為何、實際測試指令與結果、尚未驗證項目、已知限制與下一步。目前完整 228 個測試通過，S2-03 仍待獨立 review，不代表整個 S2 或完整 MVP 已完成。
-
+目前交付點為 S3-01 獨立 review；之後再接 S3-02 整份快照列表。不因部分 API 完成而宣稱 MVP 完成；沒有授權時不合併或推送。實際測試與失敗紀錄見 [testing.md](testing.md)。
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。

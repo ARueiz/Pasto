@@ -24,7 +24,7 @@ internal static class RoomEndpoints
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
             await close.ExecuteAsync(roomId, identity.ParticipantId, cancellationToken);
             return Results.NoContent();
-        }).WithName(CloseName).RequireAuthorization();
+        }).WithName(CloseName).RequireAuthorization().AddEndpointFilter<ParticipantWriteFilter>();
     }
 }
 
