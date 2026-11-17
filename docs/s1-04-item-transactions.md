@@ -79,3 +79,9 @@ Review Agent（Claude）對 `09d277f..c060864` 僅做靜態審查，P0～P2 為 
 - TransactionTestHooks 原樣集中觀察窗、鎖嘗試／barrier、SaveChanges 與 commit 故障工具；全部狀態仍屬每例建立的 instance。原兩份 AfterSave 在沒有取消來源時是否檢查 token 略有不同，保留兩個型別，避免搬移改變行為；原測試斷言不變。
 - 關房相關 22 passed，完整 99 passed／0 failed／0 skipped；Build 0 warning／0 error，格式／差異檢查通過。本 patch 待獨立 review，不宣稱已由 Claude 審查。
 - 尚未執行 S1-05 的精確期限／等待鎖後到期邊界、S2 host DI／HTTP、SignalR、Worker 或壓測；2 秒鎖逾時與 1.5 秒觀察窗的 F3 風險保留。
+
+## S1-04 最終驗證與合併核准（2026-11-17）
+
+審查方（Claude）在 `6781f81` 的乾淨工作目錄獨立執行 Release Build（0 warning／0 error）、完整 99 例測試（0 failed／0 skipped）及格式檢查，測試後無殘留 schema；與實作方結果一致。Codex 核對獨立 TRX counters 相符，詳見 [testing.md](testing.md)。
+
+使用者已核准合併。S1-04 三個 patch 已完成實作、逐階段審查與最終獨立實測；保留已記錄的 F3 風險及後續 HTTP／Worker 範圍。下一步從合併後 main 建立 `feature/s1-05-expiry-boundaries`，本次先完成合併與開分支，不開始期限邊界實作。

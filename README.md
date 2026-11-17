@@ -14,7 +14,7 @@
 | S1-01 PostgreSQL／EF Core 整合測試骨架 | 已完成（2 個 Creator 正反例） |
 | S1-02 正式持久層骨架 | 已完成（正式 Migration；共 6 個整合測試通過） |
 | S1-03 正式建房與 Owner／cascade | 已由 PR #2 合併至 main（1ad0e2b） |
-| S1-04 併發交易核心 | Patch 1／2 已經 Claude 靜態審查；Patch 3 關房與共用測試工具已實作，完整 99 例通過，待獨立 review |
+| S1-04 併發交易核心 | 三個 patch 已完成；實作方與審查方獨立實測均為 99 例通過，已核准合併 |
 | S1-05 之後（期限、API、前端、SignalR 等） | 尚未開始；前端方向待討論 |
 
 階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。

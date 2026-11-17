@@ -171,3 +171,13 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - TRX 位於忽略的本機 TestResults；本輪 Build／測試無失敗，Patch 3 尚待獨立 review。
 - 完整測試後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：0 個 schema，無測試殘留。
 - 未執行精確等於期限／等待鎖後到期的 S1-05 邊界、host DI／HTTP、SignalR、Worker、負載測試，仍依既定後續階段處理。
+
+### S1-04 審查方獨立實測（2026-11-17）
+
+- 審查方（Claude）在 `feature/s1-04-item-transactions` 的 `6781f81`、乾淨工作目錄上獨立執行並回報；這次有實測，與前述僅靜態審查的紀錄分開。
+- `dotnet build Pasto.slnx -c Release --no-restore`：成功，0 warning／0 error。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore`：99 passed／0 failed／0 skipped，測試回報約 18 秒。
+- `dotnet format Pasto.slnx --no-restore --verify-no-changes`：通過；測試後 `pasto_it_*` schema 查詢為 0 個。
+- TRX：`tests/Pasto.IntegrationTests/TestResults/s1-04-claude-review-full.trx`，已受 ignore 規則排除。Codex 實際核對 counters：total／executed／passed 均為 99，failed／notExecuted 均為 0；起訖為台灣時間 21:01:22～21:01:41。Build／format／schema 結果依審查方提供的紀錄，不冒稱本輪由 Codex 再次執行。
+- 使用者已核准合併 S1-04。後續只補本文件與進度狀態，不變更已驗證產品／測試程式；未因文件更新重跑 Build／測試。
+- 下一步從合併後的 main 建立 `feature/s1-05-expiry-boundaries`，處理既定期限邊界；不代表 S1 或 MVP 已全部完成。
