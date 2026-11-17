@@ -1,6 +1,10 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-17，S1-05 期限邊界。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom／AddItem／DeleteOwnItem／CloseRoom，尚無產品 API、前端或 SignalR。
+S2-03 實測（2026-11-18）：新增 RoomStateApiTests 33 例（29 個真 DB、4 個不連 DB）。涵蓋 metadata 契約與快照一致性、Bearer／同房／權限／有效性順序、兩層共用限流、驗證後被清理的競爭、HTTP 併發關房、commit 前回滾與 commit 後結果不確定。併發關房以 pg_blocking_pids 確認等鎖；既有 HTTP 提交故障 hook 搬至 TransactionTestHooks 共用，未改行為。
+
+本輪實際執行 Release build、相關測試、完整測試、format 與 format verify、git diff --check。Build 0 warning／0 error；相關 33 passed、完整 228 passed，皆 0 failed／0 skipped；測試後 pasto_it_* schema 為 0。測試命令使用 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，相關套件另加 `--filter FullyQualifiedName~RoomStateApiTests`。TRX 分別為 TestResults/s2-03-related.trx 與 s2-03-full.trx（測試專案內，已忽略）。本輪沒有測試失敗；未執行 S8 負載測試，S2-03 尚待獨立 review，不將實作方結果描述為審查方證據。
+
+更新：2026-11-18，S2-03 metadata／關房 API。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試載入實際 Program，body 上限另用真 Kestrel／loopback TCP 驗證。
 
 ## 1. 環境與相依
 
@@ -12,6 +16,7 @@
 | EF Core／Relational／Design | 10.0.4，Design 為工具相依且 PrivateAssets=all |
 | dotnet-ef | 10.0.4，本機工具，見 dotnet-tools.json |
 | Microsoft.NET.Test.Sdk／xunit／runner | 18.0.1／2.9.3／3.1.5 |
+| Microsoft.AspNetCore.Mvc.Testing | 10.0.13，僅測試相依，與本機 ASP.NET Core runtime 對齊 |
 
 兩個專案都有 `packages.lock.json`；測試透過 ProjectReference 使用正式 provider，不再維護測試用 DbContext 或 DDL。未新增 Testcontainers、SQLite、InMemory 或通用 Repository。
 
@@ -44,7 +49,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 120 個測試，完整通過（109 個真 DB 案例、10 個文字輸入或預先取消測試、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 228 個測試，完整通過（164 個真 DB 案例、53 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
@@ -56,6 +61,9 @@ dotnet format Pasto.slnx --no-restore --verify-no-changes
 | ItemDeletionTests（24 例） | 刪自己的文字、房主不能刪他人、檢查順序、跨房／不存在、同筆／不同筆併發、新增與刪除交錯、滿房容量釋放、鎖逾時／取消、提交前後故障 |
 | RoomClosureTests（22 例） | Creator 關房與優先檢查、保留統計／原期限／冷卻碼、併發關房輸方不可用、關房與新增／刪除兩種順序、關房回滾後新增成功、逾時／取消與提交前後故障 |
 | RoomExpiryTests（21 例） | 三條路徑的到期前一微秒／相等／後一微秒、DeletedAt；真實等鎖後到期拒絕，驗證不能用交易起始時間 |
+| RoomApiTests（39 例） | 正式建房 HTTP、偽造 Host、DI／啟動選項、pool 脫敏、錯誤表與日誌分級、真 PG provider 錯誤脫敏、代理／限流／429、提交前後取消或故障 |
+| ParticipantApiTests（29 例） | Join 正規化／後端身分、Bearer challenge body、跨房錯誤順序、me 恢復、憑證查詢前與驗證後限流、1000 人競爭、等鎖後失效、提交前後故障 |
+| RequestBodyLimitTests（7 例） | 真 Kestrel 的 32 KiB body 設定與 Content-Length／chunked 實際拒絕；413 code、no-store、未呼叫 Join Store |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
@@ -77,7 +85,7 @@ dotnet ef migrations script --project src/Pasto.Server --output src/Pasto.Server
 # dotnet ef database update --project src/Pasto.Server
 ```
 
-手動 update 使用連線預設 schema，與測試的 GUID schema 分開；測試不需要先跑 update。正式 host 也使用 `ConnectionStrings__Pasto`，啟動時不自動 Migrate。S1-03 仍無 endpoint，啟動後所有路徑為 404。建房設定與編碼規則見 [S1-03 導讀](s1-03-room-creation.md)。
+手動 update 使用連線預設 schema，與測試的 GUID schema 分開；測試不需要先跑 update。正式 host 也使用 `ConnectionStrings__Pasto`，啟動時不自動 Migrate。S2-01 已有 POST /api/rooms，其餘產品 endpoint 尚未提供。建房核心見 [S1-03 導讀](s1-03-room-creation.md)，HTTP 設定見 [S2 工作項](s2-api-identity.md)。
 
 EF 能追蹤的 CHECK／部分索引保留在 mapping 與 snapshot，初始 Migration 依 ADR 0003 以明確 SQL 建立；DEFERRABLE 不在 EF 模型內，日後任何重建這兩條 FK 的 Migration 都須手動保留並跑 catalog 測試。歷史 Migration 不引用目前 Domain 常數，避免規則變更影響舊 DDL。
 
@@ -195,3 +203,45 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - TRX 位於忽略的本機 TestResults；本輪 Build／測試無失敗，S1-05 待獨立 review，未宣稱審查方已重跑。
 - 完整測試後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：0 個 schema，無測試殘留。
 - 未開始 S2；Join、HTTP／host DI、SignalR、Worker／保留碼回收與壓測仍依後續階段處理。
+
+### S2-01 驗證紀錄（2026-11-17）
+
+- 基準 main `781470a`，分支 `feature/s2-01-create-room-api`。使用者核准 Microsoft.AspNetCore.Mvc.Testing 相依及 metadata API 歸 S2；開工前五項決策記錄於 [S2 工作項](s2-api-identity.md)。本次只交付 S2-01。
+- 新增測試套件 10.0.13 與 test lock file；首次沙箱還原遇 NU1301（網路權限不足），取得權限後正常還原，未停用 audit。
+- `dotnet restore Pasto.slnx --locked-mode`：通過。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error。
+- `dotnet format Pasto.slnx --no-restore --verify-no-changes`、`git diff --check`：通過。
+- 初次 smoke：2 passed；擴充 HTTP／host 測試：36 passed；再補 429 body 與 commit 前取消測試後完整執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s2-01-full.trx"`：158 passed／0 failed／0 skipped。
+- 本輪新增 38 例（5 個真 DB、33 個 HTTP／host 無 DB）；使用實際 Program 的註冊與 middleware，只為故障／限流情境替換 Store 或注入 EF interceptor。並非另一套測試用 DI 或寫入 helper。
+- 真 DB 的提交後取消／故障案例保留已 commit 的三筆資料，回 503 且沒有 Retry-After，不自動重送；提交前取消完整回滾。這不宣稱真實網路競爭或 client 已斷線後仍能送達回應。
+- 本輪 Build／測試無失敗；TRX：s2-01-api-smoke.trx、s2-01-api-first.trx、s2-01-full.trx，位於忽略的 TestResults。完整測試後隔離 schema 查詢：0 個。
+- 尚待獨立 review，未宣稱審查方已重跑。Join／身分驗證、me／metadata／關房 HTTP、後續限流及 SignalR／Worker／壓測仍未執行。
+
+### S2-01 審查增量
+
+- Claude 靜態審查 `781470a..a614f61`：P0～P2 共 0、P3 共 1，未重跑 Build／測試。日誌改為 4xx Information、503 Warning、500 Error；500 保留例外型別與無檔案路徑的實際 frames，不記訊息。
+- 新增真 PostgreSQL 房碼衝突的 provider 日誌驗證；原 14 個錯誤案例亦斷言日誌等級，500 診斷與敏感 sentinel 不洩漏。相關 HTTP／host 測試 39 passed，TRX 為 s2-01-review-verified.trx。
+- 首次 Build 因 using 插入位置錯誤遇 CS1529，修正後 0 warning／0 error；首次隨後執行的 no-build 結果仍是舊 38 例（s2-01-review.trx），不視為修正後證據。
+- S2-02 會驗證 challenge body 的 ParticipantUnauthorized，不能僅檢查狀態碼。S2-01 未經使用者核准不合併／推送；審查方獨立實測仍可針對此增量提交進行。
+
+### S2-02 驗證紀錄
+
+- S2-01 日誌修正保留提交 `58e7926`（相關 39 例通過，未合併）。S2-02 的分支為 feature/s2-02-join-identity，由此基準建立，沒有 schema／Migration 或套件變更。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error；`dotnet format Pasto.slnx --no-restore --verify-no-changes`、`git diff --check`：通過。
+- 首輪 `--filter FullyQualifiedName~ParticipantApiTests`：25 passed／0 failed／0 skipped（s2-02-related.trx）。補上跨 IP 全站讀取 admission、驗證器故障、Join 等鎖後關房／到期後，完整執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s2-02-full.trx"`：188 passed／0 failed／0 skipped，含全部 29 個新案例。
+- 999 人的前置資料全經正式 JoinRoom，沒有測試專用 Participant 寫入邏輯；兩個 HTTP host 以 pg_blocking_pids 證明競爭，只有一個加入成功，總數 1000，輸方與後續第 1001 人均 409，內容版本不變。
+- Join 等鎖後關房使用正式 CloseRoom；等鎖後到期用持鎖 fixture 調整 DB 時間並斷言等待方 xact_start 早於 ExpiresAt，正式 Join 仍被拒絕。commit 前取消回滾、commit 後故障保留 Participant，不自動重送。
+- 401 的狀態、ParticipantUnauthorized、correlationId、WWW-Authenticate、no-store 均經真 HTTP pipeline 檢查；跨房的 recovery Store 被替換成不應呼叫的 sentinel，證明拒絕發生在讀目標房之前。相同房間失效回 404，驗證器仍辨識到原身分。
+- 憑證前 IP／全站 admission 用計數驗證器測呼叫次數；不宣稱這組計數 spy 是 DB 查詢效能證據。實際 hash／身分查詢另由真 DB Join／me 案例覆蓋。
+- TRX 位於忽略的 TestResults；本輪 S2-02 Build／測試無失敗，測試後 0 個殘留 schema。這是實作方結果，S2-02 尚待獨立 review；審查方未獨立重跑 S2-01／02。
+- 尚未提供 metadata／關房 HTTP（S2-03）、文字 API／讀寫限流（S3）、Hub／重連（S5）、清理／分層防護／負載測試。沒有公開部署。
+
+### S2-02 審查修正（2026-11-18）
+
+- Claude 僅靜態審查，兩項 P2；未重跑測試。Finding 1 設定 Kestrel MaxRequestBodySize=32768，並修正 StatusCodePages 對 413 的 code。Finding 2 使用者選 (a) 維持 quota，風險與公開部署前必要工作已寫入 S2／S7，不宣稱已緩解。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error；格式與差異檢查通過。
+- 真 Kestrel 首輪測試 4 passed／2 failed（s2-02-body-limit.trx）：錯誤假設 chunked 在 JSON bytes 未超限時一定通過。核對 ASP.NET Core 10.0.13 原始碼確認 Kestrel 會計入分塊控制位元組；保留安全上限，明確記錄較保守的 chunked 行為，並保留對應拒絕案例、增加較小 chunked 可通過的案例。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter FullyQualifiedName~RequestBodyLimitTests --logger "trx;LogFileName=s2-02-body-limit-verified.trx"`：7 passed／0 failed／0 skipped。真 TCP 只監聽 loopback 動態埠，沒有新增套件或 TestServer 假設。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s2-02-review-full.trx"`：195 passed／0 failed／0 skipped。
+- TRX 保留在忽略的 TestResults；修正增量仍待獨立 review，不將這次執行說成 Claude 的獨立實測。未開始 S2-03、S7 防護或 S8 壓測。
+- 完整測試後唯讀查詢隔離 schema：0 個，沒有測試殘留。

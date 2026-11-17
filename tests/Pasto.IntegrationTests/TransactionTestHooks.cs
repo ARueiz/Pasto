@@ -130,4 +130,22 @@ internal static class TransactionTestHooks
             throw new InjectedFailureException();
         }
     }
+    internal sealed class HttpCommitFailureInterceptor(string stage) : DbTransactionInterceptor
+    {
+        public int Attempts { get; private set; }
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            Attempts++;
+            if (stage == "before") throw new OperationCanceledException();
+            return ValueTask.FromResult(result);
+        }
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (stage == "afterCancel") throw new OperationCanceledException();
+            if (stage == "afterDatabase") throw new NpgsqlException("Simulated response loss after join commit.");
+            return Task.CompletedTask;
+        }
+    }
 }

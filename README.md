@@ -6,7 +6,7 @@
 
 ## 目前狀態
 
-**開發中，已建立正式持久層、Application 建房、新增／刪自己文字與關房交易，尚無產品 API 或前端。**
+**開發中，已有正式交易核心與建房／加入／身分恢復／metadata／關房 API；文字 API、前端與即時同步尚未完成。**
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -15,8 +15,11 @@
 | S1-02 正式持久層骨架 | 已完成（正式 Migration；共 6 個整合測試通過） |
 | S1-03 正式建房與 Owner／cascade | 已由 PR #2 合併至 main（1ad0e2b） |
 | S1-04 併發交易核心 | 已由 GitHub PR #3 合併（2853cda）；實作方與審查方獨立實測均為 99 例通過 |
-| S1-05 期限邊界 | 新增 21 個真 DB 案例，完整 120 例通過，待獨立 review；無產品程式變更 |
-| S2 之後（API、前端、SignalR 等） | 尚未開始；前端方向待討論 |
+| S1-05 期限邊界 | 已由 PR #4 合併（781470a）；完整 120 例通過 |
+| S2-01 建房 API | Claude 靜態審查無 P0～P2；日誌 P3 已修正為 58e7926，相關 39 例通過，未合併 |
+| S2-02 加入／身分 | 審查 findings 已處理，無阻擋事項；讀取配額風險依決策保留至 S7 處理 |
+| S2-03 metadata／關房 | 已實作，新增 33 例、完整 228 例通過，待獨立 review；S2 尚未推送或合併 |
+| S3 與後續 | 尚未開始；前端方向待討論 |
 
 階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
@@ -83,3 +86,4 @@ dotnet test Pasto.slnx --configuration Release --no-restore
 - [S1-03 建房流程與驗證](docs/s1-03-room-creation.md)
 - [S1-04 交易拆分與 Patch 1 驗證](docs/s1-04-item-transactions.md)
 - [S1-05 期限邊界與 S1 驗證對照](docs/s1-05-expiry-boundaries.md)
+- [S2 API／匿名身分工作項與 S2-01 設定](docs/s2-api-identity.md)
