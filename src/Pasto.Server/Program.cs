@@ -58,6 +58,8 @@ builder.Services.AddScoped<JoinRoom>();
 builder.Services.AddScoped<IParticipantVerifier, ParticipantVerifier>();
 builder.Services.AddScoped<IParticipantRecoveryStore, ParticipantRecoveryStore>();
 builder.Services.AddScoped<GetParticipant>();
+builder.Services.AddScoped<IRoomStateStore, RoomStateStore>();
+builder.Services.AddScoped<GetRoomState>();
 builder.Services.AddSingleton<ParticipantReadLimiter>();
 builder.Services.AddAuthentication(ParticipantAuthenticationHandler.SchemeName)
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ParticipantAuthenticationHandler>(
@@ -89,6 +91,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapRoomCreation();
 app.MapParticipants();
+app.MapRoomStateAndClosure();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
 

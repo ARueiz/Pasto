@@ -14,20 +14,13 @@ internal static class ParticipantEndpoints
             var joined = await join.ExecuteAsync(request.Code, cancellationToken);
             return Results.Created($"/api/rooms/{joined.RoomId}/me", new JoinedRoomResponse(joined));
         }).WithName(JoinName).AllowAnonymous();
-        app.MapGet("/api/rooms/{roomId:guid}/me", async (Guid roomId, HttpContext context,
-            GetParticipant get, ParticipantReadLimiter limiter, Microsoft.Extensions.Options.IOptions<ApiOptions> options,
+        app.MapGet("/api/rooms/{roomId:guid}/me", async (Guid roomId, HttpContext context, GetParticipant get,
             CancellationToken cancellationToken) =>
         {
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
-            using var lease = limiter.Acquire(identity.ParticipantId);
-            if (!lease.IsAcquired)
-            {
-                await CreationRateLimiting.RejectAsync(context, lease, options.Value.ReadPerParticipant.PeriodSeconds);
-                return;
-            }
             var participant = await get.ExecuteAsync(roomId, identity.ParticipantId, cancellationToken);
-            await Results.Ok(participant).ExecuteAsync(context);
-        }).WithName(MeName).RequireAuthorization();
+            return Results.Ok(participant);
+        }).WithName(MeName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
     }
 }
 

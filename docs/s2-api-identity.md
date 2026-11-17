@@ -1,6 +1,6 @@
 # S2：房間 API 與匿名身分
 
-基準 main `781470a`。依使用者核准，新增 Microsoft.AspNetCore.Mvc.Testing 測試相依；metadata API 歸 S2，S3 沿用並加入文字 API／快照，不另建平行入口。每個 patch 測試後交獨立 review；目前已進入 S2-02，不推送或合併。
+基準 main `781470a`。依使用者核准，新增 Microsoft.AspNetCore.Mvc.Testing 測試相依；metadata API 歸 S2，S3 沿用並加入文字 API／快照，不另建平行入口。每個 patch 測試後交獨立 review；目前 S2-03 已實作，待獨立 review，不推送或合併。
 
 ## 已固定的決策
 
@@ -86,7 +86,7 @@ S2-01 經 Claude 靜態審查，P0～P2 為 0、P3 為 1，未獨立重跑測試
 
 S2-02 新增 29 例（20 真 DB、9 HTTP／host 無 DB），完整 188 passed／0 failed／0 skipped，含 S2-01 修正後 39 例與 S1 的 120 例。特別驗證 challenge body 不被 StatusCodePages 改成 InvalidRequest、跨房先拒絕、不重建身分、保留原內容版本、查憑證前限流、999 人競爭、第 1001 人 409、等鎖後關房／到期、提交前後取消／故障。
 
-完整測試後 0 個殘留 schema；S2-02 尚待獨立 review，沒有推送／合併，不開始 S2-03。分散猜碼、partition 硬上限及負載證據留 S7／S8；S4 靜態資源接入時再將 no-store 限縮到 API 範圍，當前 host 只有 API。
+完整測試後 0 個殘留 schema；S2-02 審查 findings 已處理（見後續紀錄）；S2-03 已實作，沒有推送／合併。分散猜碼、partition 硬上限及負載證據留 S7／S8；S4 靜態資源接入時再將 no-store 限縮到 API 範圍，當前 host 只有 API。
 
 ## S2-02 審查修正與風險決策（2026-11-18）
 
@@ -109,3 +109,17 @@ Program 將 Kestrel 全域 MaxRequestBodySize 固定為 32768 bytes，在 JSON �
 另一項既有設計風險亦列入 S7：持有分享連結者可持續 Join 耗盡 1000 個生命週期名額，讓其他人無法加入。Participant 上限是資料預算，不是濫用防護；公開部署前需濫用測試與取捨確認，不能自行刪除被內容引用的 Participant 釋放名額。
 
 修正後 Build 0 warning／0 error，Kestrel 相關測試 7 passed，完整 195 passed／0 failed／0 skipped；格式檢查通過。失敗分析、TRX 與獨立審查界線見 testing.md。
+
+## S2-03 交付與驗證（2026-11-18）
+
+S2-02 findings 已處理，Claude 最終靜態審查無阻擋事項；這不代表審查方已獨立執行測試。本 patch 從 `bc97100` 建立 `feature/s2-03-room-state-closure`，尚未推送或合併。
+
+- GET /api/rooms/{roomId}：Bearer 與同房檢查後，回傳 version（十進位字串）、itemCount、totalBytes、expiresAt、serverTime、limits，不含正文或憑證。短唯讀 REPEATABLE READ 交易取得一致統計及 DB 時間；與 /me 共用 RoomReadAccess，不取得寫入 row lock。
+- metadata 與 /me 共用驗證前每 IP／全站 read admission，以及驗證後 Participant ID 的讀取配額。ParticipantReadFilter 先檢查同房，再消耗 Participant 配額。
+- DELETE /api/rooms/{roomId}：沿用 CloseRoom／RoomWriteAccess，鎖內檢查有效性、同房與 Creator，提交後回 204。重複關房或遇到已關／到期房間，拋 RoomUnavailableException，由共用錯誤流程回 404 RoomUnavailable。
+- DELETE 也使用驗證前 read admission，保護 Credential 查詢；不消耗 Participant 的讀取配額，讀取額度耗盡仍可由房主關房。沒有新增限流設定或改變數值。
+- verifier 後房間被實體清理的競爭，由實際讀取／關房 use case 拋例外，不直接回空白 404。關房不刪文字、不釋放房碼或 Participant，清理仍留 S6。
+
+新增 RoomStateApiTests 33 例：字串版本、資料不洩漏、缺少／無效／跨房憑證、失效房間、權限順序、共用配額、驗證前限流、未提交寫入期間的讀取、實體清理競爭、併發關房與提交失敗／取消。既有 Join 提交故障 interceptor 原樣搬至 TransactionTestHooks，供 HTTP 關房共用。
+
+實作方實測：Release Build 0 warning／0 error，相關 33 passed，完整 228 passed／0 failed／0 skipped，format verify 與 diff check 通過；殘留 schema 為 0。TRX 見 testing.md。S2-03 待獨立 review；S3 尚未開始。沒有 schema、Migration 或相依變更，S7 配額與濫用風險維持原狀。

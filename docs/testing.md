@@ -1,6 +1,10 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-18，S2-02 審查修正。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試載入實際 Program，body 上限另用真 Kestrel／loopback TCP 驗證。
+S2-03 實測（2026-11-18）：新增 RoomStateApiTests 33 例（29 個真 DB、4 個不連 DB）。涵蓋 metadata 契約與快照一致性、Bearer／同房／權限／有效性順序、兩層共用限流、驗證後被清理的競爭、HTTP 併發關房、commit 前回滾與 commit 後結果不確定。併發關房以 pg_blocking_pids 確認等鎖；既有 HTTP 提交故障 hook 搬至 TransactionTestHooks 共用，未改行為。
+
+本輪實際執行 Release build、相關測試、完整測試、format 與 format verify、git diff --check。Build 0 warning／0 error；相關 33 passed、完整 228 passed，皆 0 failed／0 skipped；測試後 pasto_it_* schema 為 0。測試命令使用 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，相關套件另加 `--filter FullyQualifiedName~RoomStateApiTests`。TRX 分別為 TestResults/s2-03-related.trx 與 s2-03-full.trx（測試專案內，已忽略）。本輪沒有測試失敗；未執行 S8 負載測試，S2-03 尚待獨立 review，不將實作方結果描述為審查方證據。
+
+更新：2026-11-18，S2-03 metadata／關房 API。DB 案例使用正式 Migration 與隔離 schema；HTTP／host 測試載入實際 Program，body 上限另用真 Kestrel／loopback TCP 驗證。
 
 ## 1. 環境與相依
 
@@ -45,7 +49,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 195 個測試，完整通過（135 個真 DB 案例、49 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 228 個測試，完整通過（164 個真 DB 案例、53 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |

@@ -232,4 +232,4 @@ HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻�
 
 之後依需求 AC-01～AC-15 測安全與 1,000 連線、熱房、同 NAT、300 筆×8 KiB、重連風暴／補償流量，量測方案 A 整份快照的查詢／傳輸放大及熱房收斂。硬體、候選 p95、每秒 20 次平衡新增／刪除仍待實測。達瓶頸先調查詢、限制、通知合併及單實例資源；需要時才另評估局部同步、多實例 SignalR backplane／託管服務，不重採 ADR 0001 的共同權限模型。
 
-2026-11-18：S1 已合併。S2-01 的日誌修正保留於 58e7926；S2-02 已有 Join／Bearer／me，審查後再補 Kestrel 全域 32 KiB body 上限與真 TCP 測試，完整 195 例通過，增量待 review。chunked framing 亦計入原生上限；讀取 quota 依使用者選 (a) 維持，少數來源耗盡全站配額及 Join 名額濫用列為 S7 公開部署前必要工作。metadata／關房 HTTP 留 S2-03，Hub 留 S5；無 schema／Migration／套件變更，尚未合併 S2。詳細決策見 [S2 工作項](s2-api-identity.md)。
+2026-11-18：S1 已完成；S2-01／02 findings 已處理。S2-03 已接 metadata 與關房 HTTP；metadata 與 me 共用驗證前 read admission、Participant 配額及唯讀 snapshot 檢查；關房沿用 CloseRoom／RoomWriteAccess。完整 228 例通過，S2-03 待獨立 review。S2 尚未推送或合併，S3 尚未開始。沒有 schema、Migration 或相依變更；Kestrel body 上限及 S7 配額／濫用風險維持。見 [S2 工作項](s2-api-identity.md)。

@@ -262,7 +262,7 @@ public sealed class ParticipantApiTests
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         var room = await CreateRoomAsync(database);
-        var failure = new JoinFailureInterceptor(stage);
+        var failure = new HttpCommitFailureInterceptor(stage);
         await using var factory = new PastoApiFactory(database.ConnectionString, configureServices: services =>
             services.AddDbContextFactory<PastoDbContext>(options => options.AddInterceptors(failure)));
         using var client = factory.CreateClient();
@@ -454,23 +454,5 @@ public sealed class ParticipantApiTests
     {
         public Task<ParticipantIdentity?> VerifyAsync(string credential, CancellationToken cancellationToken)
             => throw new NpgsqlException("Simulated identity storage outage.");
-    }
-    private sealed class JoinFailureInterceptor(string stage) : DbTransactionInterceptor
-    {
-        public int Attempts { get; private set; }
-        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
-            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
-        {
-            Attempts++;
-            if (stage == "before") throw new OperationCanceledException();
-            return ValueTask.FromResult(result);
-        }
-        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
-            CancellationToken cancellationToken = default)
-        {
-            if (stage == "afterCancel") throw new OperationCanceledException();
-            if (stage == "afterDatabase") throw new NpgsqlException("Simulated response loss after join commit.");
-            return Task.CompletedTask;
-        }
     }
 }
