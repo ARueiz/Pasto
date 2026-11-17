@@ -1,5 +1,27 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S3-01 審查修正：測試連線池（2026-11-18）
+
+PostgresTestDatabase 改為每個 fixture 擁有一個 NpgsqlDataSource，Pooling=true、MinPoolSize=0、MaxPoolSize=16、NoResetOnClose=false。context／正式 use case 共用該 fixture 的 pool；schema 仍逐測試隔離。初始化先歸還建 schema 的 lease，再做正式 Migration；Dispose 先關閉自有 data source，再用一條不入池的連線 DROP 自有 schema。不使用 ClearAllPools，也不改正式 Program 的連線設定或測試併發程度。
+
+新增 TestDatabasePoolingTests 3 例：確認連續 context 重用 backend 並重設 session／交易設定，同時持有的 context PID 不同且 search_path 隔離，以及 dispose 後 idle backend 結束、只有自有 schema 被刪。既有鎖競爭測試的 pg_blocking_pids 斷言保持原樣。
+
+同一台 Windows、相同沙箱外執行方式，以 netstat 每約 500 ms 取樣遠端 port 55432 的 TIME_WAIT；峰值是取樣最大值，不宣稱捕捉到所有瞬間峰值。修改後最後兩輪在同一命令中緊接執行，沒有等待 TIME_WAIT 退完。
+
+| 執行 | 通過／失敗／略過 | 測試耗時 | TIME_WAIT 開始／峰值／結束 |
+| --- | --- | --- | --- |
+| 修改前基準 | 266／0／0 | 約 20 秒 | 0／4837／4837 |
+| 修改後連續第 1 輪 | 269／0／0 | 約 13 秒 | 0／544／544 |
+| 修改後連續第 2 輪 | 269／0／0 | 約 13 秒 | 544／1088／1088 |
+
+資料支持「停用 pooling 造成大量短連線與 TIME_WAIT 壓力」的機制與修正效果；本輪未刻意重現先前的 port 耗盡，因此仍不宣稱已排除所有可能根因。測試後殘留 pasto_it_* schema 為 0。
+
+實際執行 Release build（0 warning／0 error）、format 與 format verify、diff check。相關測試 11 例通過；修正後另兩次完整測試也均為 269 passed，但因工具等待讓 TIME_WAIT 歸零，以上表的緊接兩輪作為連續執行證據。完整測試命令沿用 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，加上各輪 TRX logger。
+
+保留的失敗／量測工具紀錄：第一輪相關測試為 10 passed／1 failed，重用測試拿到不同 PID；原因是初始化同時保留建 schema 與 Migration 的兩條連線。已先歸還初始化 lease，斷言未放寬，後續 11 例通過。基準量測包裝程式曾因無法取得 Process.ExitCode 而回傳 1，但 TRX 是 Completed、266 passed；後續包裝程式改以 TRX outcome／counters 判定，不將工具狀態誤列為測試失敗。
+
+TRX 與取樣 JSON／stdout／stderr 保存在被忽略的 TestResults：s3-01-pool-baseline、s3-01-pool-related（失敗）、s3-01-pool-related-fixed、s3-01-pool-fixed-full-1／2、s3-01-pool-consecutive-1／2。本輪尚待獨立 review，未開始 S3-02。以下保留先前交付的歷史紀錄。
+
 ## S3-01 驗證紀錄（2026-11-18）
 
 新增 ItemWriteApiTests 38 例（34 個真 DB，含 3 個真 Kestrel；4 個不連 DB）。覆蓋原文保留、8192／8193 UTF-8 bytes、空白／NUL／不成對 surrogate、拒絕授權欄位、401／403／404／409、重複刪除、Participant 新增／刪除配額分離、關房共用刪除配額、驗證前粗限流、提交前／後故障與不重試。300 筆前置資料透過正式 AddItem 建立。
@@ -62,7 +84,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 266 個測試，完整通過（198 個真 DB 案例〔含 3 個真 Kestrel〕、57 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 269 個測試，完整通過（201 個真 DB 案例〔含 3 個真 Kestrel〕、57 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |

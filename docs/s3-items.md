@@ -9,6 +9,7 @@
 - Owner 只能取自驗證身分，body 僅允許 content（拒絕 Owner／Creator 等未知欄位）。跨房身分先回 401；業務有效性與授權仍由既有鎖內流程重驗。
 - POST／DELETE items 與 DELETE room 在驗證前共用既有 IP／全站 admission，保護 verifier。驗證後新增套用 Participant 每分鐘 30／burst 10，刪除文字與關房共用 Participant 每分鐘 60／burst 10。使用不同於讀取的 Participant bucket；通過 JSON binding 與同房檢查後，業務成功／失敗均消耗額度，不排隊，429 帶 Retry-After 與 no-store。JSON 綁定錯誤與未通過同房檢查的請求仍受驗證前粗限流保護。
 - 每房寫入 token bucket、分類並行與部署資源 admission 依 ADR 0003 留 S7，不在本 patch 擴大範圍。S7 既有讀取／Join 濫用風險持續存在，補齊前不公開部署。
+- 驗證前共用的 admission 仍名為 read；少數來源耗盡其全站配額時，除 me／metadata／快照，也會阻擋新增文字、刪除文字與關房。Participant 寫入配額不會緩解這個較前面的共用入口風險，列入 S7 驗證。
 - 測試：HTTP 身分／權限、輸入與 byte 邊界、內容保留、計數／版本、無操作刪除、限流順序與共用性、提交失敗／取消、不重試。既有 S1 併發／容量測試與 S2 body 邊界測試納入回歸。
 
 ## S3-02：整份快照列表
@@ -26,3 +27,7 @@ S5 再接交易成功後 SignalR 通知與既定同步驗收條件。本輪不�
 新增 38 例；最終相關 38 passed，完整 266 passed／0 failed／0 skipped；Release Build 0 warning／0 error，format verify 與 diff check 通過，殘留 schema 為 0。先前兩次完整測試曾因 socket 連線失敗未全綠；完整錯誤與後續驗證紀錄見 testing.md，不省略失敗結果。
 
 本 patch 尚待獨立 review；S3-02 未開始。目前不需要額外手動 API 測試；UI 操作與即時同步驗收仍留 S4／S5。
+
+## S3-01 審查修正
+
+P2 測試連線池：fixture 改為自有 NpgsqlDataSource 與有界 pool，結束時先關 pool 再清 schema，保留原隔離及正式 use case 建資料方式。新增 3 例驗證重用、session 重設、獨立連線與清理；連續兩輪完整測試各 269 passed／0 failed／0 skipped，TIME_WAIT 取樣峰值由基準單輪 4837 降為修正後單輪 544，緊接第二輪累積峰值 1088，殘留 schema 為 0。完整失敗、取樣限制與 TRX 紀錄見 testing.md。僅修正測試設施，沒有變更產品程式；修正後仍待獨立 review，S3-02 未開始。

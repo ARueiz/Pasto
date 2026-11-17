@@ -1,6 +1,6 @@
 # Pasto — Sprint 1 分階段實作計畫
 
-日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1 已合併；S2 已經 PR #5 合併（9eace5f）；S3-01 文字寫入／配額已實作，待獨立 review；S3-02 快照列表尚未開始**（2026-11-18）。已有建房／加入／Bearer／me API，完整 266 例測試通過。S2 決策見 [S2 工作項](s2-api-identity.md)，實測見 [testing.md](testing.md)。讀取 quota 依使用者選擇維持，風險仍在並列入 S7；S2 已合併。
+日期：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 調整 S1-02 之後的內容。執行狀態：**S1 已合併；S2 已經 PR #5 合併（9eace5f）；S3-01 文字寫入／配額已實作，待獨立 review；S3-02 快照列表尚未開始**（2026-11-18）。已有建房／加入／Bearer／me API，連續兩輪完整 269 例測試通過。S2 決策見 [S2 工作項](s2-api-identity.md)，實測見 [testing.md](testing.md)。讀取 quota 依使用者選擇維持，風險仍在並列入 S7；S2 已合併。
 
 依據：[最終需求](requirements.md)、[最終架構](architecture.md)、[ADR 0002](decisions/0002-room-code-and-anonymous-participants.md)、[ADR 0003](decisions/0003-mvp-scope-reduction.md)。ADR 0001 僅供歷史比較，不是實作來源。
 
@@ -111,7 +111,7 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 驗收：
 
 - AC-13／AC-15：多來源猜碼、連續錯碼、NAT 合法使用者、偽造 X-Forwarded-For、無效 Credential 及直接 Hub invocation 有預期防護，429／Retry-After、503 明確。
-- S2-02 使用者已選擇維持讀取配額：單一 IP 可用掉全站 50%，少數來源可耗盡驗證前讀取配額，影響合法 me／metadata／快照同步。這是仍未緩解的可用性風險；公開部署前必須處理並驗證合法重連／讀取預算、失敗壓力模式與全站／NAT 取捨，再由 S8 提供負載證據。
+- S2-02 使用者已選擇維持讀取配額：單一 IP 可用掉全站 50%，少數來源可耗盡驗證前讀取配額，影響合法 me／metadata／快照同步。S3 寫入 API 與 DELETE room 也共用此 admission，因此耗盡時新增文字、刪除文字與關房同樣會被擋下，不再只影響讀取。這是仍未緩解的可用性風險；公開部署前必須處理並驗證合法重連／讀取／寫入預算、失敗壓力模式與全站／NAT 取捨，再由 S8 提供負載證據。
 - 分享連結持有者可反覆 Join 耗盡 1000 個生命週期名額。公開部署前需做濫用測試、提出防護與資料預算取捨，不將 Participant 上限當成防濫用保證，也不能刪被文字引用的 Participant 來繞過預算。
 - partition／失敗記錄達上限仍有界，新鍵不直接放行；通知／Client dirty／伺服器連線追蹤不因輸入數量無界成長。
 - 高負載先限制建／加入，讀、刪、清理仍有預算；全站連線足夠容納目標千人，同 IP 不被過小連線額度卡住；DB pool 合計與 max_connections 有餘裕。
