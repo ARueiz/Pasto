@@ -1,6 +1,6 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
-更新：2026-11-17，S1-04 Patch 3。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom／AddItem／DeleteOwnItem／CloseRoom，尚無產品 API、前端或 SignalR。
+更新：2026-11-17，S1-05 期限邊界。測試引用正式 `Pasto.Server`，每個 DB 案例使用獨立 schema，由正式 Migration 建表。已有 Application CreateRoom／AddItem／DeleteOwnItem／CloseRoom，尚無產品 API、前端或 SignalR。
 
 ## 1. 環境與相依
 
@@ -44,7 +44,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 99 個測試，完整通過（88 個真 DB 案例、10 個文字輸入或預先取消測試、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 120 個測試，完整通過（109 個真 DB 案例、10 個文字輸入或預先取消測試、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |
@@ -55,6 +55,7 @@ dotnet format Pasto.slnx --no-restore --verify-no-changes
 | ItemAdditionTests（29 例） | 文字驗證、同房／容量／失效檢查、一般參與者、真 DB 鎖競爭與取消／逾時、統計／版本、提交前回滾及提交後例外、非 55P03 故障不轉忙碌；見 S1-04 工作項 |
 | ItemDeletionTests（24 例） | 刪自己的文字、房主不能刪他人、檢查順序、跨房／不存在、同筆／不同筆併發、新增與刪除交錯、滿房容量釋放、鎖逾時／取消、提交前後故障 |
 | RoomClosureTests（22 例） | Creator 關房與優先檢查、保留統計／原期限／冷卻碼、併發關房輸方不可用、關房與新增／刪除兩種順序、關房回滾後新增成功、逾時／取消與提交前後故障 |
+| RoomExpiryTests（21 例） | 三條路徑的到期前一微秒／相等／後一微秒、DeletedAt；真實等鎖後到期拒絕，驗證不能用交易起始時間 |
 | Migration_PreservesCompositeForeignKeysAndCascadeDefinitions | pg_constraint 的五條 FK 欄位／參照、NO ACTION／CASCADE、deferred 定義 |
 | Migration_CreatesChecksAndRequiredIndexes | 八條 CHECK、部分索引、排序／Owner／唯一索引實際定義 |
 | Migration_CanReapplyAndRollbackWithoutModelDrift | snapshot 無模型漂移；重跑不重建、Down 可拆循環、Up 可再套用 |
@@ -181,3 +182,16 @@ S1-01 的歷史教學見 [入門導讀](s1-01-dotnet-postgresql-guide.md)，其�
 - TRX：`tests/Pasto.IntegrationTests/TestResults/s1-04-claude-review-full.trx`，已受 ignore 規則排除。Codex 實際核對 counters：total／executed／passed 均為 99，failed／notExecuted 均為 0；起訖為台灣時間 21:01:22～21:01:41。Build／format／schema 結果依審查方提供的紀錄，不冒稱本輪由 Codex 再次執行。
 - 使用者已核准合併 S1-04。後續只補本文件與進度狀態，不變更已驗證產品／測試程式；未因文件更新重跑 Build／測試。
 - 下一步從合併後的 main 建立 `feature/s1-05-expiry-boundaries`，處理既定期限邊界；不代表 S1 或 MVP 已全部完成。
+
+### S1-05 驗證紀錄（2026-11-17）
+
+- 已 pull GitHub main 的 PR #3 merge `2853cda`，S1-05 分支快轉至同一基準。本輪只有 RoomExpiryTests 與文件變更，不改產品程式、schema、Migration 或套件。
+- `dotnet build Pasto.slnx -c Release --no-restore`：通過，0 warning／0 error。
+- `dotnet format Pasto.slnx --no-restore --verify-no-changes`、`git diff --check`：通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter FullyQualifiedName~RoomExpiryTests --logger "trx;LogFileName=s1-05-related.trx"`：21 passed／0 failed／0 skipped。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s1-05-full.trx"`：120 passed／0 failed／0 skipped，含既有 deferred FK 正反例、rollback／commit 故障及併發案例的回歸。
+- 18 例以測試 interceptor 在鎖後時間查詢點讀取 persisted ExpiresAt 加偏移，精確固定比較語意；3 例不替換時間查詢，先觀察 pg_blocking_pids，再由持鎖 fixture 以 DB 時間設定到期並提交。後者斷言等待方 xact_start 早於 ExpiresAt，正式操作仍被拒絕，可抓出誤用 now() 或等鎖前取時間。
+- 前者不是自然牆鐘命中微秒的證據；後者才驗證真實 clock_timestamp／鎖等待。測試限制與 S1 出口條件對照見 [S1-05](s1-05-expiry-boundaries.md)。
+- TRX 位於忽略的本機 TestResults；本輪 Build／測試無失敗，S1-05 待獨立 review，未宣稱審查方已重跑。
+- 完整測試後唯讀查詢 `^pasto_it_[0-9a-f]{32}$`：0 個 schema，無測試殘留。
+- 未開始 S2；Join、HTTP／host DI、SignalR、Worker／保留碼回收與壓測仍依後續階段處理。
