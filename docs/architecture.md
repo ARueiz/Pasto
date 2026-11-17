@@ -232,4 +232,4 @@ HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻�
 
 之後依需求 AC-01～AC-15 測安全與 1,000 連線、熱房、同 NAT、300 筆×8 KiB、重連風暴／補償流量，量測方案 A 整份快照的查詢／傳輸放大及熱房收斂。硬體、候選 p95、每秒 20 次平衡新增／刪除仍待實測。達瓶頸先調查詢、限制、通知合併及單實例資源；需要時才另評估局部同步、多實例 SignalR backplane／託管服務，不重採 ADR 0001 的共同權限模型。
 
-2026-11-09：S1-02 已合併；S1-03 的正式 CreateRoom 與 Creator／Owner／cascade 行為已實作驗證，24 個測試通過，已靜態審查，尚待提交。沒有新增 schema／套件，尚無 API、UI 或壓測。
+2026-11-17：S1-03 已由 PR #2 合併（main 1ad0e2b）。S1-04 三個 patch 已完成，實作方與審查方獨立實測均為完整 99 例通過，使用者已核准合併。新增／刪除／關房均共用 Infrastructure 內部鎖房檢查流程，8192／300 與有效性判斷歸 Domain；關房只更新 DeletedAt／Version，清理留 S6。沒有新增 schema／套件，尚無 API、UI 或壓測；精確期限邊界留 S1-05。工作項與驗證見 [S1-04](s1-04-item-transactions.md)。
