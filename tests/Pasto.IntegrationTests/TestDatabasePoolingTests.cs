@@ -8,7 +8,7 @@ namespace Pasto.IntegrationTests;
 public sealed class TestDatabasePoolingTests
 {
     [Fact]
-    public async Task SequentialContexts_ReuseBackend_AndResetSessionAndTransactionSettings()
+    public async Task SequentialContexts_ReuseBackend_AndResetSessionSettings()
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         PoolSession original;
@@ -17,10 +17,11 @@ public sealed class TestDatabasePoolingTests
             await context.Database.OpenConnectionAsync();
             original = await ReadSessionAsync(context);
             await context.Database.ExecuteSqlRawAsync("SET application_name = 'pasto_pool_probe'");
-            await using var transaction = await context.Database.BeginTransactionAsync();
-            await context.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '17ms'");
-            Assert.Equal("17ms", (await ReadSessionAsync(context)).LockTimeout);
-            await transaction.RollbackAsync();
+            var lockTimeout = original.LockTimeout == "17ms" ? "18ms" : "17ms";
+            await context.Database.ExecuteSqlRawAsync(lockTimeout == "17ms"
+                ? "SET lock_timeout = '17ms'"
+                : "SET lock_timeout = '18ms'");
+            Assert.Equal(lockTimeout, (await ReadSessionAsync(context)).LockTimeout);
         }
         await using var reused = database.CreateContext();
         var session = await ReadSessionAsync(reused);
