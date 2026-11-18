@@ -87,6 +87,7 @@ test('360px light room preserves text, searches safely, copies and confirms dele
   await expect(search).toHaveCount(0);
   await page.getByRole('button', { name: '複製', exact: true }).click();
   await expect(page.getByText('無法自動複製')).toBeVisible();
+  await expect(page.locator('.copy-toast[role="status"]')).toBeEmpty();
   const fallback = page.getByRole('textbox', { name: '手動複製文字' });
   expect(await fallback.evaluate(element => (element as HTMLTextAreaElement).selectionEnd)).toBe(original.length);
   await page.getByRole('button', { name: '關閉', exact: true }).click();
@@ -110,7 +111,7 @@ test('360px light room preserves text, searches safely, copies and confirms dele
   await expect(page.locator('.message')).toHaveCount(1);
 });
 
-test('desktop dark room switches theme, refreshes manually, recovers identity and leaves', async ({ page }, info) => {
+test('desktop dark room switches theme, refreshes manually and recovers owner identity', async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ colorScheme: 'dark' });
   const state = await mockApi(page);
@@ -140,10 +141,8 @@ test('desktop dark room switches theme, refreshes manually, recovers identity an
   expect(state.me).toBe(1);
   expect(state.joins).toBe(0);
   await page.getByRole('button', { name: '更多選項' }).click();
-  await page.getByRole('button', { name: '離開房間' }).click();
-  await page.getByRole('dialog').getByRole('button', { name: '離開房間' }).click();
-  await expect(page).toHaveURL('/');
-  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  await expect(page.getByRole('button', { name: '關閉房間' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '離開房間' })).toHaveCount(0);
 });
 
 test('restore 401 waits for new identity and does not rejoin on reload', async ({ page }) => {
@@ -164,7 +163,7 @@ test('restore 401 waits for new identity and does not rejoin on reload', async (
   await expect(page.getByRole('button', { name: '關閉房間' })).toHaveCount(0);
 });
 
-test('pasting a share URL resolves its room code and joins as a visitor', async ({ page }) => {
+test('a visitor joins by a pasted share URL and can leave without closing the room', async ({ page }) => {
   const state = await mockApi(page);
   await page.goto('/');
   const input = page.getByRole('textbox', { name: '六位房碼' });
@@ -180,6 +179,96 @@ test('pasting a share URL resolves its room code and joins as a visitor', async 
   expect(state.joins).toBe(1);
   await page.getByRole('button', { name: '更多選項' }).click();
   await expect(page.getByRole('button', { name: '關閉房間' })).toHaveCount(0);
+  await page.getByRole('button', { name: '離開房間' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '離開房間' }).click();
+  await expect(page).toHaveURL('/');
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  expect(state.closed).toBe(false);
+});
+
+for (const view of [
+  { width: 360, height: 740, colorScheme: 'light' },
+  { width: 1280, height: 800, colorScheme: 'dark' },
+] as const) {
+  test(`${view.width}px ${view.colorScheme}: copy toast, composer focus and role-based menus`, async ({ page }, info) => {
+    await page.setViewportSize({ width: view.width, height: view.height });
+    await page.emulateMedia({ colorScheme: view.colorScheme });
+    await page.clock.install();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (text: string) => {
+        document.documentElement.dataset.testClipboard = text;
+      } } });
+    });
+    await mockApi(page);
+    await page.goto('/');
+    await page.getByRole('button', { name: '建立新房間' }).click();
+    await expect(page.locator('.message')).toHaveCount(1);
+
+    const toast = page.locator('.copy-toast[role="status"]');
+    const composer = page.locator('.composer-input');
+    const chat = page.locator('.chat-scroll');
+    const composerBefore = await composer.boundingBox();
+    const chatBefore = await chat.boundingBox();
+    await page.getByRole('button', { name: '複製邀請' }).click();
+    await expect(toast).toHaveText('已複製邀請');
+    const invite = page.url();
+    expect(await page.locator('html').getAttribute('data-test-clipboard')).toBe(invite);
+    expect(await composer.boundingBox()).toEqual(composerBefore);
+    expect(await chat.boundingBox()).toEqual(chatBefore);
+    expect((await toast.boundingBox())!.y + (await toast.boundingBox())!.height).toBeLessThan(composerBefore!.y);
+    await expect(page.getByRole('textbox', { name: '手動複製文字' })).toHaveCount(0);
+
+    await page.clock.runFor(1200);
+    await page.getByRole('button', { name: '複製邀請' }).click();
+    await expect(toast).toHaveText('已複製邀請\u00a0');
+    expect(await toast.textContent()).toBe('已複製邀請\u00a0');
+    await page.clock.runFor(1000);
+    await expect(toast).toHaveText('已複製邀請');
+    await page.clock.runFor(1100);
+    await expect(toast).toBeEmpty();
+
+    await page.getByRole('button', { name: '複製', exact: true }).click();
+    await expect(toast).toHaveText('已複製文字');
+    expect(await page.locator('html').getAttribute('data-test-clipboard')).toBe(original);
+    await page.getByRole('button', { name: '重新整理' }).focus();
+    await page.keyboard.press('Tab');
+    const input = page.getByRole('textbox', { name: '要送出的文字' });
+    await expect(input).toBeFocused();
+    await expect(input).toHaveCSS('outline-style', 'none');
+    const accent = view.colorScheme === 'light' ? 'rgb(13, 148, 136)' : 'rgb(20, 184, 166)';
+    await expect(composer).toHaveCSS('border-top-color', accent);
+    await expect(composer).toHaveCSS('box-shadow', `${accent} 0px 0px 0px 1px`);
+    await page.screenshot({ path: info.outputPath('focus-and-copy.png') });
+    await page.clock.runFor(2100);
+    await expect(toast).toBeEmpty();
+
+    await page.getByRole('button', { name: '更多選項' }).click();
+    await expect(page.getByRole('button', { name: '關閉房間' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '離開房間' })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath('owner-menu.png') });
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto(invite);
+    await expect(page.locator('.message')).toHaveCount(1);
+    await page.getByRole('button', { name: '更多選項' }).click();
+    await expect(page.getByRole('button', { name: '離開房間' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '關閉房間' })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath('visitor-menu.png') });
+  });
+}
+
+test('missing Clipboard API falls back to selected invite text', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined });
+  });
+  await mockApi(page);
+  await page.goto('/r/ABC123');
+  await expect(page.locator('.message')).toHaveCount(1);
+  await page.getByRole('button', { name: '複製邀請' }).click();
+  await expect(page.getByText('無法自動複製')).toBeVisible();
+  const fallback = page.getByRole('textbox', { name: '手動複製文字' });
+  await expect(fallback).toHaveValue(page.url());
+  expect(await fallback.evaluate(element => (element as HTMLTextAreaElement).selectionEnd)).toBe(page.url().length);
+  await expect(page.locator('.copy-toast[role="status"]')).toBeEmpty();
 });
 
 test('denied sessionStorage and throttled reads show the matching notices', async ({ page }) => {

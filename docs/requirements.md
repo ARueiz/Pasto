@@ -36,7 +36,7 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 | 刪整個房間 | 允許 | 禁止 |
 | 轉移房主／恢復遺失身分 | 不支援 | 不支援 |
 
-每房 Credential 用 sessionStorage 保存；F5 先驗證原憑證，不重新 Join。提供「離開並清除此分頁身分」，清本機內容、憑證與連線；不撤銷其他副本、不刪文字。不用 localStorage，不依賴 beforeunload 刪 Participant。憑證遺失即失去舊刪除權／房主權，重加是新身分。
+每房 Credential 用 sessionStorage 保存；F5 先驗證原憑證，不重新 Join。「離開並清除此分頁身分」只適用於非房主，會清除本機內容、憑證與連線，不撤銷其他副本或刪除文字。MVP 沒有房主權限轉移，房主清除分頁身分後會永久失去關房權限。不用 localStorage 儲存憑證，不依賴 beforeunload 刪 Participant。憑證遺失即失去舊刪除權／房主權，重加是新身分。
 
 分頁複製、opener、Session Restore 與 XSS 可能複製／取得 sessionStorage，不能保證關頁立即銷毀。手機掃 QR 是獨立 Participant，不繼承電腦身分。[sessionStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage)
 
@@ -104,7 +104,7 @@ MVP 不設每次寫入競爭的全站資料庫配額列，不用 TotalBytes 實�
 | ID | 場景與預期 |
 | --- | --- |
 | AC-01 | 建房／房主／保留碼原子成功或全回滾，Code 碰撞有界重試，不回他人房間。跨房 Owner／Creator 被 DB 複合 FK 拒絕。 |
-| AC-02 | 手輸／URL／QR 加入；QR 無 Credential，手機非房主；F5 恢復不建新 Participant。主動離開清本分頁，遺失身分不恢復舊權限；Session Restore 不誤稱已銷毀。 |
+| AC-02 | 手輸／URL／QR 加入；QR 無 Credential，手機非房主；F5 恢復不建新 Participant。主動離開只適用於非房主，會清除本分頁身分。遺失身分不恢復舊權限；Session Restore 不誤稱已銷毀。 |
 | AC-03 | A／B 各建一筆，只刪自己；房主也不能單刪他人的文字，但可關房。改 RoomId、itemId 或 Owner／Creator 不繞過授權。 |
 | AC-04 | 8,192 原文 bytes 可接受、8,193 拒絕；含中文字／emoji／換行／原始空白，無靜默截斷；空白拒絕；Body 32 KiB 與原文限制分測，超 body 回 413。 |
 | AC-05 | 有空位時 200 筆各 8 KiB（總計超過舊 1.5 MiB）仍可新增；TotalBytes 正確但不參與房間容量拒絕。第 301 筆拒絕。299 筆時併發新增只有一筆成功。 |

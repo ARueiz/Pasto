@@ -13,6 +13,7 @@ const dateFormat = new Intl.DateTimeFormat('zh-TW', { year: 'numeric', month: 'l
 const noItems: Item[] = [];
 
 type Confirmation = { kind: 'leave' | 'close' } | { kind: 'delete'; id: string };
+type CopyFeedback = { kind: 'success'; message: string } | { kind: 'fallback'; text: string };
 const confirmationText = {
   leave: ['離開房間？', '這個分頁會清除身分與已載入的文字。房間和其他裝置不受影響。', '離開房間'],
   close: ['關閉房間？', '關閉後，所有人都無法再讀取此房間。', '關閉房間'],
@@ -49,11 +50,12 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   const [menu, setMenu] = useState(false);
   const [draft, setDraft] = useState('');
   const [confirmation, setConfirmation] = useState<Confirmation>();
-  const [fallback, setFallback] = useState<string>();
-  const [copied, setCopied] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>();
   const [scrollRequest, setScrollRequest] = useState(0);
   const active = useRef<AbortController | null>(null);
-  const alive = useRef(true);
+  const copyRequest = useRef(0);
+  const copyTimer = useRef<number | undefined>(undefined);
+  const lastAnnouncement = useRef('');
   const list = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const menuHost = useRef<HTMLDivElement>(null);
@@ -93,13 +95,17 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   }, [session]);
 
   useEffect(() => {
-    alive.current = true;
     void run(async signal => {
       await refresh(signal);
       if (!signal.aborted) setScrollRequest(value => value + 1);
     });
-    return () => { alive.current = false; active.current?.abort(); active.current = null; };
+    return () => { active.current?.abort(); active.current = null; };
   }, [refresh, run]);
+
+  useEffect(() => () => {
+    copyRequest.current++;
+    window.clearTimeout(copyTimer.current);
+  }, []);
 
   useLayoutEffect(() => {
     if (scrollRequest && list.current) list.current.scrollTop = list.current.scrollHeight;
@@ -122,14 +128,21 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   }, [menu]);
 
   async function copy(text: string, label: string) {
-    setFallback(undefined);
-    setCopied('');
+    const request = ++copyRequest.current;
+    window.clearTimeout(copyTimer.current);
+    setCopyFeedback(undefined);
     try {
       await navigator.clipboard.writeText(text);
-      if (alive.current) setCopied(label);
     } catch {
-      if (alive.current) setFallback(text);
+      if (request === copyRequest.current) setCopyFeedback({ kind: 'fallback', text });
+      return;
     }
+    if (request !== copyRequest.current) return;
+    // Keep consecutive identical confirmations distinguishable to VoiceOver.
+    const message = lastAnnouncement.current === label ? `${label}\u00a0` : label;
+    lastAnnouncement.current = message;
+    setCopyFeedback({ kind: 'success', message });
+    copyTimer.current = window.setTimeout(() => setCopyFeedback(undefined), 2000);
   }
 
   function closeSearch() {
@@ -191,9 +204,10 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
           {menu && <div className="room-menu"><ThemeOptions theme={theme} onChange={onTheme} />
             <button className="menu-action" type="button" disabled={pending} onClick={reload}>重新整理</button>
             <div className="menu-divider" />
-            <button className="menu-action destructive" type="button" onClick={() => { setMenu(false); setConfirmation({ kind: 'leave' }); }}>離開房間</button>
-            {session.isCreator && <button className="menu-action destructive" type="button" disabled={pending || needsRefresh}
-              onClick={() => { setMenu(false); setConfirmation({ kind: 'close' }); }}>關閉房間 <small>房主</small></button>}
+            {session.isCreator ? <button className="menu-action destructive" type="button" disabled={pending || needsRefresh}
+              onClick={() => { setMenu(false); setConfirmation({ kind: 'close' }); }}>關閉房間 <small>房主</small></button>
+              : <button className="menu-action destructive" type="button"
+                onClick={() => { setMenu(false); setConfirmation({ kind: 'leave' }); }}>離開房間</button>}
           </div>}
         </div>
       </div></div>
@@ -218,8 +232,10 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
     <div className="room-notices">
         {!saved && <StatusNotice title="身分只保存在這次開啟的頁面">瀏覽器不允許保存身分，重新整理後會失去目前身分。</StatusNotice>}
         {error && <ErrorNotice error={error.value} uncertain={error.uncertain} />}
-        {fallback !== undefined && <CopyFallback value={fallback} close={() => setFallback(undefined)} />}
-        {copied && <p className="copy-feedback" role="status">{copied}</p>}
+        {copyFeedback?.kind === 'fallback' && <CopyFallback value={copyFeedback.text} close={() => setCopyFeedback(undefined)} />}
+    </div>
+    <div className="copy-toast" role="status">
+      {copyFeedback?.kind === 'success' && <span>{copyFeedback.message}</span>}
     </div>
     <main className="chat-scroll" ref={list} aria-label="房間文字" aria-busy={pending}>
       <div className="chat-body">
