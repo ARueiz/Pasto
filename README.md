@@ -6,7 +6,7 @@
 
 ## 目前狀態
 
-**開發中，S2 房間與身分 API 已合併；S3 文字新增／刪除與寫入配額已實作，快照列表、前端與即時同步尚未完成。**
+**S1～S4 已合併至 `main`。** 目前可在瀏覽器建房、分享與操作文字。跨裝置更新需手動重新整理，下一階段是 S5 的 SignalR 通知與自動同步。
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -17,11 +17,11 @@
 | S1-04 併發交易核心 | 已由 GitHub PR #3 合併（2853cda）；實作方與審查方獨立實測均為 99 例通過 |
 | S1-05 期限邊界 | 已由 PR #4 合併（781470a）；完整 120 例通過 |
 | S2 房間／匿名身分 API | 已由 PR #5 合併（9eace5f）；228 例通過，使用者確認測試審查 OK |
-| S3-01 文字寫入與配額 | 已實作，獨立 review 通過，連線池 P3 測試已補強。包含 DELETE room 寫入配額 |
-| S3-02 整份快照列表 | 已實作，獨立 review 無阻擋問題，審查方兩輪完整 278 例通過。見 [S3 工作項](docs/s3-items.md) |
-| S4 基本前端 | 入口頁與房間頁、身分恢復、分享、文字與搜尋、手動刷新。見 [UI 規格](docs/ui-spec.md) 與 [本機啟動與 API](docs/s4-api.md) |
+| S3 文字操作、配額與快照 | 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併（`dbfcb24`）。獨立審查的兩輪完整測試各 278 例通過。見 [S3 工作項](docs/s3-items.md) |
+| S4 基本前端 | 已由 [PR #7](https://github.com/ARueiz/Pasto/pull/7) 合併（`00c2183`）。包含入口頁、房間頁、身分恢復、分享、文字操作、搜尋與手動刷新。Edge 10 例通過。見 [UI 規格](docs/ui-spec.md) 與 [本機啟動與 API](docs/s4-api.md) |
+| S5 SignalR 通知與同步 | 下一階段，尚未開始 |
 
-階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
+目前交付點與下一步見 [TODO.md](TODO.md)，整體規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
 ## MVP 範圍
 

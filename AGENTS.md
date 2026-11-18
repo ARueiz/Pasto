@@ -222,6 +222,8 @@ Trade-offs，並等待確認：
 
 ## 10. Completion Report
 
+每個主要階段（S1、S2、S3 等）合併至 `main` 後，更新 `README.md` 的目前狀態與進度表，記錄合併的 PR、已交付功能及下一個階段，並與 `TODO.md` 保持一致。
+
 完成任務後，請簡潔回報：
 
 ### Summary

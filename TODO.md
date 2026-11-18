@@ -11,8 +11,9 @@
 | S3-01 功能提交 | `408593e`：文字新增／刪除 API 與 Participant 寫入配額 |
 | S3-01 P3 修正 | `df2510d`：補強連線池設定重設驗證 |
 | S3 交付 | [PR #6](https://github.com/ARueiz/Pasto/pull/6) 包含 S3-01 與 S3-02，目標分支為 `main`，合併狀態以 PR 為準 |
-| 當前交付點 | S3-02 獨立 review 已完成，無阻擋問題，P3 已補文件。審查範圍 `df2510d..a05d87f` |
-| S4 交付分支 | `feature/s4-clipboard-ui`，由合併 S3 的 `dbfcb24` 建立。完整獨立 review 已完成，P2 已修正並通過回歸，由使用者在 GitHub 上手動合併至 `main` |
+| S3-02 審查 | 獨立 review 已完成，無阻擋問題，P3 已補文件。審查範圍 `df2510d..a05d87f` |
+| S4 交付 | `feature/s4-clipboard-ui` 已由使用者透過 [PR #7](https://github.com/ARueiz/Pasto/pull/7) 合併至 `main@00c2183`。完整獨立 review 已完成，P2 已修正並通過回歸 |
+| 當前交付點 | 本機 `main` 已快轉至 `00c2183`。S5 尚未開始，預計 2026-11-20（Asia/Taipei）接續 |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -31,6 +32,7 @@
 - [x] S4 MacBook 經 Dev Tunnels HTTPS 實機驗證：使用者確認複製直接成功、提示會自動消失、房主選單不顯示離開。
 - [x] S4 完整獨立 review（`dbfcb24..7d8960e`）：無阻擋問題，有 1 個 P2 和 3 個 P3。身分恢復、切房時晚到的回應（200 和 401）、純文字渲染、憑證不進 URL 或 QR Code，都已經驗證。
 - [x] S4 P2 修正：`CopyFallback` 只在開啟或文字變更時聚焦並選取。新增 Edge 回歸測試，確認手動複製框開著時，輸入框與搜尋框仍能逐字輸入並保有焦點。
+- [x] S4 合併：PR #7 已合併，本機 `main` 已同步。
 - [ ] S5：SignalR 通知與同步驗收。
 - [ ] S6：到期／關房資料清理。
 - [ ] S7：防護、資源與濫用處理。
@@ -65,7 +67,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S4 完整獨立 review 已完成，`CopyFallback` 搶焦點的 P2 也已修正並通過回歸。由使用者在 GitHub 手動合併 S4 PR，合併後才開始 S5。
+2026-11-20 從 `main@00c2183` 建立 S5 功能分支，依 [S5 實作計畫](docs/sprint-1-implementation-plan.md#6-s5signalr-與方案-a-同步) 先處理伺服器端的同房訂閱授權與交易提交後的 `RoomChanged` 通知，再接前端快照同步與斷線重連。S4 的 P3 和待補回歸測試保留下方。本輪只同步 `main` 與更新交接文件。
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
