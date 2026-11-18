@@ -1,6 +1,6 @@
 # Pasto — 開發進度與下一步
 
-更新日期：2026-11-18（Asia/Taipei）。這是目前狀態的入口；開工前先讀 [AGENTS.md](AGENTS.md)，並以實際 Git 狀態核對本檔。詳細設計與驗證紀錄以連結文件為準。
+更新日期：2026-11-19（Asia/Taipei）。這是目前狀態的入口；開工前先讀 [AGENTS.md](AGENTS.md)，並以實際 Git 狀態核對本檔。詳細設計與驗證紀錄以連結文件為準。
 
 ## 目前位置
 
@@ -12,6 +12,7 @@
 | S3-01 P3 修正 | `df2510d`：補強連線池設定重設驗證 |
 | S3 交付 | [PR #6](https://github.com/ARueiz/Pasto/pull/6) 包含 S3-01 與 S3-02，目標分支為 `main`，合併狀態以 PR 為準 |
 | 當前交付點 | S3-02 獨立 review 已完成，無阻擋問題，P3 已補文件。審查範圍 `df2510d..a05d87f` |
+| S4 交付分支 | `feature/s4-clipboard-ui`，由合併 S3 的 `dbfcb24` 建立。完整獨立 review 已完成，P2 已修正並通過回歸，由使用者在 GitHub 上手動合併至 `main` |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -24,13 +25,24 @@
 - [x] S3-01 修正的獨立 review／審查方驗證：無 P0～P2；非阻擋 P3 已補強測試。
 - [x] S3-02 實作：整份文字快照列表、唯讀交易與既有讀取配額。
 - [x] S3-02 獨立 review：無阻擋問題，P3 補記最壞回應大小估算與後續量測。
-- [ ] S4：基本前端 UI。
+- [x] S4 實作：房間身分與分享、聊天室文字操作、搜尋、狀態提示、手動刷新與主題切換。
+- [x] S4 實測調整：定時複製提示、輸入框圓角焦點、房主選單只保留關房。
+- [x] S4 實測調整獨立 review（`7d8960e`）：無 P0～P2。非阻擋 P3：浮動複製提示的垂直位置寫死 128px，放大字級或展開 QR 面板時可能疊在其他元素上。
+- [x] S4 MacBook 經 Dev Tunnels HTTPS 實機驗證：使用者確認複製直接成功、提示會自動消失、房主選單不顯示離開。
+- [x] S4 完整獨立 review（`dbfcb24..7d8960e`）：無阻擋問題，有 1 個 P2 和 3 個 P3。身分恢復、切房時晚到的回應（200 和 401）、純文字渲染、憑證不進 URL 或 QR Code，都已經驗證。
+- [x] S4 P2 修正：`CopyFallback` 只在開啟或文字變更時聚焦並選取。新增 Edge 回歸測試，確認手動複製框開著時，輸入框與搜尋框仍能逐字輸入並保有焦點。
 - [ ] S5：SignalR 通知與同步驗收。
 - [ ] S6：到期／關房資料清理。
 - [ ] S7：防護、資源與濫用處理。
 - [ ] S8：壓測與收尾。
 
 ## 最新驗證
+
+S4 P2：修正前逐字輸入 `Pasto clipboard` 時只留下 `P`，已由新增測試重現。修正後 TypeScript、Lint、Build 通過，完整 Edge 10 例通過。
+
+S4 實測調整的 TypeScript、Lint、Build 與 Edge 瀏覽器測試 9 例通過。Edge 使用模擬 API，已擷取 360px 淺色、1280px 深色畫面。先前後端回歸 278 例通過，本輪只有前端與文件變更。開發工具稽核限制見 [S4 前端 API](docs/s4-api.md)。
+
+審查方（Claude）2026-11-19 在 `7d8960e` 獨立重跑：TypeScript、Lint、Build 通過，Edge 9 例全數通過。部署環境實測（2026-11-18，區網 Vite＋正式後端）：API 授權邊界 21 項符合預期，包括跨房 token、訪客刪除或關房、關房後 404。區網 HTTP 不是 secure context，Clipboard API 不可用，因此裝置測試改用 Dev Tunnels HTTPS（private，限 owner）。MacBook 實機驗證已由使用者確認通過；iPhone 掃 QR 尚未測試。
 
 S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全部通過。Release Build、格式檢查通過，殘留 schema 0。TRX 核對結果見 [測試紀錄](docs/testing.md)。
 
@@ -53,7 +65,9 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S3 由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 交付。合併後，下一個工作項為從 `main` 接續 S4 基本前端 UI。S3-01 的非阻擋 P3 修正保留於 `df2510d`，S3-02 的最壞回應估算及審查證據見 [測試紀錄](docs/testing.md)。
+S4 完整獨立 review 已完成，`CopyFallback` 搶焦點的 P2 也已修正並通過回歸。由使用者在 GitHub 手動合併 S4 PR，合併後才開始 S5。
+
+S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
 ## 後續必須保留的事項
 
@@ -62,6 +76,15 @@ S3 由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 交付。合併後，下�
 - S7：持有分享連結者可反覆 Join 耗盡 1,000 個生命週期 Participant 名額。
 - S7／S8：實測以控制字元填滿 300 筆時的 JSON 回應大小與讀取頻寬。S8 另測 1,000 條連線同時重抓。
 - **S7 防護補齊前不得公開部署**；已記錄風險不代表已緩解，不自行調整既定配額。
+- S5：補 AC-08 的自動化回歸測試，驗證換房、離開、關房之後晚到的回應不會污染畫面。目前只有審查方用 Playwright 探測腳本驗證過，e2e 裡沒有。
+- S5（S4 P3）：`api.ts` 的 `fetch` 沒有設定逾時。請求一直沒有回應時，「重新整理」會被停用、輸入框變成唯讀，畫面上也沒有任何提示，要等瀏覽器自己逾時才能操作。建議用 `AbortSignal.any([signal, AbortSignal.timeout(...)])`，逾時後走既有的「結果不確定」流程。
+- S4 P3：在選單按 Esc，或用 Esc 取消確認對話框之後，焦點會掉到 `<body>`。建議把焦點還給「更多選項」按鈕。
+- S4 P3：浮動複製提示的垂直位置寫死在 128px（`4 * --space-8`）。放大字級或展開 QR 面板時，提示會疊在其他元素上。它設了 `pointer-events: none`，不會擋到點擊。
+- S7／部署（AWS）：要決定前端由 CloudFront＋S3 提供，或由後端直接提供建置好的檔案。這屬於新增基礎設施，要先提方案、等使用者確認。部署時要設定以下 header：
+  - CSP 初稿：`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`。其中 `img-src` 必須允許 `data:`，因為 Vite 把 logo 的 SVG 內嵌成 `data:` URI，用在 `mask-image` 上。
+  - `Referrer-Policy: no-referrer`、HSTS、`X-Content-Type-Options: nosniff`。
+  - 快取：`index.html` 設 `no-cache`；帶 hash 的 `assets/` 設長期快取。
+  - 驗證方式：用 `vite preview` 套上這組 header 跑 e2e。S5 加入 SignalR 後，要再確認 `connect-src` 是否涵蓋 `wss://`。
 
 ## 文件入口與維護
 

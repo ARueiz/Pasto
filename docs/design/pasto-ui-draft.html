@@ -1,0 +1,636 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Pasto 介面草稿</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* 版面：上方控制列 → 色彩系統 → 入口頁（手機＋桌面）→ 房間頁（手機＋桌面）→ 狀態提示 → 待決事項 */
+/* Pasto 色彩系統（藍綠）：Primary / Hover / Background / Surface / Text / Border 為指定色，其餘為推導色 */
+:root {
+  --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --border: #E2E8F0;
+  --fg: #152D31; --fg-muted: #4A6166;
+  --accent: #0D9488; --accent-strong: #0F766E; --accent-hover: #115E59; --accent-soft: #E0F2F0; --accent-fg: #FFFFFF;
+  --danger: #C62828; --danger-soft: #FCEBEB;
+  --shadow: 0 1px 2px rgba(21, 45, 49, .06), 0 4px 16px rgba(21, 45, 49, .06);
+
+  --font-ui: "Inter", "Noto Sans TC", system-ui, -apple-system, "Segoe UI", "Microsoft JhengHei", sans-serif;
+  --font-display: "Inter", "Noto Sans TC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B1220; --surface: #172532; --surface-2: #1E3040; --border: #304250;
+    --fg: #F1F5F9; --fg-muted: #9DAEB9;
+    --accent: #14B8A6; --accent-strong: #14B8A6; --accent-hover: #2DD4BF; --accent-soft: #123634; --accent-fg: #042F2E;
+    --danger: #F47C7C; --danger-soft: #3A1C1E;
+    --shadow: 0 0 0 1px rgba(255, 255, 255, .02);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B1220; --surface: #172532; --surface-2: #1E3040; --border: #304250;
+  --fg: #F1F5F9; --fg-muted: #9DAEB9;
+  --accent: #14B8A6; --accent-strong: #14B8A6; --accent-hover: #2DD4BF; --accent-soft: #123634; --accent-fg: #042F2E;
+  --danger: #F47C7C; --danger-soft: #3A1C1E;
+  --shadow: 0 0 0 1px rgba(255, 255, 255, .02);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.25; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 56px; }
+
+/* 控制列 */
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  border-bottom: 1px solid var(--border); padding-block: 14px;
+  display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand b { font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
+.brand span { color: var(--fg-muted); font-size: 13px; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; }
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.seg button { border: 0; background: transparent; padding: 5px 12px; border-radius: 999px; cursor: pointer; font-size: 13px; color: var(--fg-muted); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); font-weight: 600; }
+
+.intro { display: grid; gap: 10px; max-width: 68ch; padding-top: 32px; }
+.intro h1 { font-size: clamp(26px, 4vw, 36px); font-weight: 800; letter-spacing: -.02em; }
+.intro p { color: var(--fg-muted); }
+.sec-head { display: grid; gap: 6px; margin-bottom: 20px; max-width: 70ch; }
+.sec-head h2 { font-size: 22px; font-weight: 700; }
+.sec-head p { color: var(--fg-muted); }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-strong); font-weight: 700; }
+
+/* 色彩系統 */
+.tokens { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.tok-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.tok-row:last-child { border-bottom: 0; }
+.tok-row.head { background: var(--surface-2); font-size: 12px; color: var(--fg-muted); font-weight: 600; letter-spacing: .04em; padding-block: 8px; }
+.tok-name { display: grid; gap: 2px; min-width: 0; }
+.tok-name b { font-size: 14px; }
+.tok-name small { font-size: 12px; color: var(--fg-muted); }
+.tok-name .derived { display: inline-block; width: fit-content; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--fg-muted); border: 1px solid var(--border); }
+.tok-sw { display: flex; align-items: center; gap: 8px; min-width: 0; font-family: var(--font-mono); font-size: 12px; }
+.tok-sw i { flex: none; width: 36px; height: 28px; border-radius: 6px; border: 1px solid rgba(128, 128, 128, .35); }
+@media (max-width: 520px) {
+  .tok-row { grid-template-columns: 1fr 1fr; }
+  .tok-name { grid-column: 1 / -1; }
+  .tok-row.head .tok-name { display: none; }
+}
+
+.contrast { margin-top: 20px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+th { font-size: 12px; color: var(--fg-muted); font-weight: 600; letter-spacing: .04em; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.chip.ok { background: var(--accent-soft); color: var(--fg); }
+.chip.bad { background: var(--danger-soft); color: var(--danger); }
+.sample { display: inline-block; padding: 2px 10px; border-radius: 6px; font-weight: 600; }
+
+/* Logo 候選 */
+.logos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+.logo-card { text-align: left; cursor: pointer; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 0; overflow: hidden; display: grid; }
+.logo-card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.lg-stage { display: flex; align-items: flex-end; gap: 18px; padding: 22px 20px 18px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.tile { flex: none; display: grid; place-items: center; background: var(--accent-strong); color: var(--accent-fg); }
+.tile svg { width: 58%; height: 58%; }
+.t72 { width: 72px; height: 72px; border-radius: 20px; }
+.t40 { width: 40px; height: 40px; border-radius: 11px; }
+.t24 { width: 24px; height: 24px; border-radius: 7px; }
+.t16 { width: 16px; height: 16px; border-radius: 4px; }
+.t16 svg { width: 72%; height: 72%; }
+.lg-sizes { display: flex; align-items: flex-end; gap: 12px; }
+.lg-body { padding: 14px 16px 16px; display: grid; gap: 10px; }
+.lockup { display: flex; align-items: center; gap: 10px; }
+.lockup .c-word b { font-size: 19px; }
+.lg-body h3 { font-size: 15px; font-weight: 700; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.lg-body h3 small { font-size: 12px; font-weight: 500; color: var(--fg-muted); }
+.lg-body p { font-size: 13px; color: var(--fg-muted); }
+.lg-body .note { font-size: 12px; }
+.cur-tag { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); }
+
+/* 裝置外框 */
+.frames { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+.frame-col { display: grid; gap: 8px; min-width: 0; }
+.frame-col.desk { flex: 1 1 560px; }
+.frame-cap { font-size: 12px; color: var(--fg-muted); font-weight: 600; letter-spacing: .04em; }
+.phone {
+  width: 360px; max-width: 100%; border: 1px solid var(--border); border-radius: 30px; padding: 10px;
+  background: var(--surface-2);
+}
+.browser { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--surface-2); }
+.chrome { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.chrome i { width: 9px; height: 9px; border-radius: 50%; background: var(--border); display: inline-block; }
+.chrome .url { flex: 1; min-width: 0; background: var(--surface); border-radius: 999px; padding: 3px 12px; font-size: 12px; color: var(--fg-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.screen { background: var(--bg); container-type: inline-size; border-radius: 22px; overflow: hidden; }
+.browser .screen { border-radius: 0; }
+
+/* 模擬畫面元件 */
+.m-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.m-logo { display: flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: -.02em; }
+.m-logo svg { color: var(--accent); }
+.m-nav-r { display: flex; align-items: center; gap: 8px; }
+.icon-btn { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+.m-body { padding: 20px 16px 24px; display: grid; gap: 16px; }
+.m-hero { text-align: center; display: grid; gap: 6px; padding-block: 12px 4px; }
+.m-hero h3 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+.m-hero p { color: var(--fg-muted); font-size: 14px; }
+.entry-cards { display: grid; gap: 14px; }
+@container (min-width: 560px) {
+  .entry-cards { grid-template-columns: 1fr 1fr; max-width: 640px; margin: 0 auto; width: 100%; }
+  .m-hero h3 { font-size: 34px; }
+  .m-body { padding: 32px 28px 36px; gap: 22px; }
+}
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow); }
+.entry { padding: 20px; display: grid; gap: 12px; justify-items: center; text-align: center; border-top: 3px solid var(--accent); }
+.entry.join { border-top-color: var(--fg-muted); }
+.ico { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.entry.join .ico { background: var(--surface-2); color: var(--fg); }
+.entry h4 { margin: 0; font-size: 17px; font-weight: 700; }
+.entry p { font-size: 13px; color: var(--fg-muted); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--r-sm); padding: 8px 14px; font-weight: 600; font-size: 14px; cursor: pointer; border: 1px solid transparent; white-space: nowrap; }
+.btn.primary { background: var(--accent-strong); color: var(--accent-fg); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.ghost { background: var(--surface); border-color: var(--border); }
+.btn.ghost:hover { border-color: var(--accent); }
+.btn.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn.sm { padding: 4px 10px; font-size: 13px; }
+.btn.block { width: 100%; }
+.code-row { display: flex; gap: 8px; width: 100%; }
+.code-in { flex: 1; min-width: 0; text-align: center; font-family: var(--font-mono); font-weight: 700; letter-spacing: .3em; text-transform: uppercase; border: 1px solid var(--border); background: var(--bg); border-radius: var(--r-sm); padding: 8px; }
+.code-in::placeholder { color: var(--fg-muted); letter-spacing: .3em; }
+.hint { font-size: 12px; color: var(--fg-muted); text-align: center; }
+
+/* 房間頁：聊天室 */
+.chat { display: flex; flex-direction: column; height: 640px; position: relative; background: var(--bg); }
+.browser .chat { height: 600px; }
+.c-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.c-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.c-mark { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-strong); color: var(--accent-fg); }
+.c-word { display: grid; line-height: 1.1; }
+.c-word b { font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
+.c-word small { font-size: 11px; color: var(--fg-muted); }
+.c-head-r { display: flex; align-items: center; gap: 4px; }
+.online { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg-muted); margin-right: 4px; white-space: nowrap; }
+.online i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ghost-ico { width: 34px; height: 34px; display: grid; place-items: center; border-radius: var(--r-sm); border: 0; background: transparent; color: var(--fg-muted); cursor: pointer; }
+.ghost-ico:hover, .ghost-ico[aria-expanded="true"] { background: var(--surface-2); color: var(--fg); }
+
+.c-room { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.c-room .label { display: block; }
+.room-code { font-family: var(--font-mono); font-weight: 700; font-size: 18px; letter-spacing: .14em; }
+.c-room-acts { display: flex; gap: 6px; }
+.btn.soft { background: var(--accent-soft); color: var(--fg); }
+.btn.soft svg { color: var(--accent); }
+.label { font-size: 11px; color: var(--fg-muted); letter-spacing: .06em; font-weight: 600; }
+.c-search { display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.s-box { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; color: var(--fg-muted); }
+.s-box:focus-within { border-color: var(--accent); }
+.s-box input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; padding: 8px 0; color: var(--fg); }
+.s-count { font-size: 12px; color: var(--fg-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.s-close { border: 0; background: transparent; color: var(--accent-strong); font-weight: 600; font-size: 14px; padding: 6px 4px; cursor: pointer; white-space: nowrap; }
+.bubble mark { background: #FDE68A; color: #152D31; border-radius: 3px; padding: 0 1px; }
+.s-empty { align-self: center; text-align: center; margin-top: 40px; display: grid; gap: 4px; color: var(--fg-muted); font-size: 14px; }
+.s-empty b { color: var(--fg); }
+.qr-panel { display: flex; gap: 14px; align-items: center; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.qr-panel p { font-size: 12px; color: var(--fg-muted); }
+.qr-panel code { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.qr { flex: none; width: 112px; aspect-ratio: 1; display: grid; grid-template-columns: repeat(21, 1fr); background: #FFFFFF; padding: 7px; border-radius: 8px; border: 1px solid var(--border); }
+.qr span.on { background: #152D31; }
+
+.menu { position: absolute; top: 56px; right: 12px; z-index: 3; min-width: 200px; padding: 6px; display: grid; }
+.menu button { display: flex; align-items: center; gap: 10px; text-align: left; border: 0; background: transparent; padding: 9px 10px; border-radius: var(--r-sm); cursor: pointer; font-size: 14px; }
+.menu button:hover { background: var(--surface-2); }
+.menu .sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.menu .dz { color: var(--danger); }
+.menu small { margin-left: auto; font-size: 11px; color: var(--fg-muted); }
+
+.msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+.day { align-self: center; font-size: 12px; color: var(--fg-muted); }
+.sync-note { align-self: center; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-muted); background: var(--surface-2); border-radius: 999px; padding: 4px 6px 4px 12px; }
+.sync-note button { border: 0; background: var(--surface); border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.msg { display: grid; gap: 4px; max-width: min(78%, 520px); }
+.msg.other { align-self: flex-start; justify-items: start; }
+.msg.mine { align-self: flex-end; justify-items: end; }
+.who { font-size: 12px; color: var(--fg-muted); padding-inline: 4px; }
+.bubble { padding: 10px 14px; border-radius: 16px; font-size: 15px; line-height: 1.55; }
+.bubble pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; }
+.msg.other .bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg.mine .bubble { background: var(--accent-strong); color: var(--accent-fg); border-bottom-right-radius: 4px; font-weight: 500; }
+.msg-foot { display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--fg-muted); padding-inline: 4px; }
+.msg-foot button { border: 0; background: transparent; color: var(--fg-muted); font-size: 12px; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+.msg-foot button:hover { background: var(--surface-2); color: var(--fg); }
+.msg-foot button.del:hover { color: var(--danger); }
+
+.composer { padding: 10px 16px 14px; background: var(--bg); display: grid; gap: 6px; }
+.comp-box { display: flex; align-items: flex-end; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 8px 8px 8px 14px; }
+.comp-box:focus-within { border-color: var(--accent); }
+.comp-box textarea { flex: 1; min-width: 0; border: 0; background: transparent; resize: none; outline: none; line-height: 1.5; padding: 6px 0; max-height: 132px; height: 34px; }
+.comp-box textarea::placeholder { color: var(--fg-muted); }
+.send { flex: none; width: 36px; height: 36px; border-radius: 10px; border: 0; display: grid; place-items: center; background: var(--accent-strong); color: var(--accent-fg); cursor: pointer; }
+.send:hover { background: var(--accent-hover); }
+.send:disabled { background: var(--surface-2); color: var(--fg-muted); cursor: not-allowed; }
+.bytes { justify-self: end; font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.bytes.over { color: var(--danger); font-weight: 700; }
+.meta { font-size: 12px; color: var(--fg-muted); }
+@container (min-width: 620px) {
+  .msgs, .composer { padding-inline: max(24px, calc((100% - 760px) / 2)); }
+}
+
+/* 狀態提示 */
+.states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 14px; }
+.state { padding: 14px 16px; display: grid; gap: 6px; border-left: 4px solid var(--fg-muted); }
+.state.err { border-left-color: var(--danger); }
+.state.info { border-left-color: var(--accent); }
+.state b { font-size: 14px; }
+.state p { font-size: 13px; color: var(--fg-muted); }
+.state .where { font-size: 11px; color: var(--fg-muted); letter-spacing: .04em; }
+
+.decide { display: grid; gap: 12px; padding-left: 1.2em; margin: 0; max-width: 72ch; }
+.decide li::marker { color: var(--accent); font-weight: 700; }
+.decide b { display: block; }
+.decide span { color: var(--fg-muted); font-size: 14px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn, .seg button { transition: background-color .15s, border-color .15s, box-shadow .15s; }
+}
+</style>
+
+<div class="topbar">
+  <div class="brand"><b>Pasto</b><span>介面草稿 · S4 討論用</span></div>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="主題">
+      <button type="button" data-theme-set="system" aria-pressed="true">跟隨系統</button>
+      <button type="button" data-theme-set="light" aria-pressed="false">淺色</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">深色</button>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+  <header class="intro">
+    <span class="eyebrow">線框圖＋色彩系統</span>
+    <h1>Pasto 的兩個畫面與藍綠色彩系統</h1>
+    <p>主色已定為藍綠色。上方可以切換深淺色，下面所有畫面會一起變。版面參考你提供的 DropConnect 截圖：淡灰底、白色卡片、單一主色、留白多。內容是示意資料，按鈕不會連到後端。</p>
+  </header>
+
+  <section aria-labelledby="sec-color">
+    <div class="sec-head">
+      <span class="eyebrow">1 · 色彩</span>
+      <h2 id="sec-color">Pasto 專用色彩系統</h2>
+      <p>淺色模式的按鈕、自己的泡泡和主色文字改用 #0F766E（Primary Strong），白字對比 5.47:1；#0D9488 保留給圖示、邊線、焦點框等非文字用途，這類元素只需要 3:1。按鈕底色換成 #0F766E 後，滑過色往深一階到 #115E59。標「推導」的是延伸出來的輔助色；深色模式不受影響。</p>
+    </div>
+    <div class="tokens" id="tokens"></div>
+
+    <div class="contrast">
+      <table>
+        <thead><tr><th>組合（目前主題）</th><th>範例</th><th>對比</th><th>WCAG AA</th></tr></thead>
+        <tbody id="contrast-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="sec-logo">
+    <div class="sec-head">
+      <span class="eyebrow">2 · Logo</span>
+      <h2 id="sec-logo">Logo 候選</h2>
+      <p>目前保留兩個：正在用的疊層圖示，和跟字標一致的 P. 字標。每張卡都放了 72／40／24／16px 四種尺寸，16px 大約就是瀏覽器分頁上的 favicon，太細的線條在這個尺寸會糊掉。點卡片可以把下面的入口頁和房間頁換成那個 logo。</p>
+    </div>
+    <div class="logos" id="logos"></div>
+  </section>
+
+  <section aria-labelledby="sec-entry">
+    <div class="sec-head">
+      <span class="eyebrow">3 · 入口頁</span>
+      <h2 id="sec-entry">建立房間／加入房間</h2>
+      <p>參考圖用裝置分成「電腦／手機」兩張卡；Pasto 改成用動作分。加入卡片直接放六碼輸入框，掃 QR 或開分享連結的人不會經過這頁。</p>
+    </div>
+    <div class="frames">
+      <div class="frame-col"><span class="frame-cap">手機 · 360px</span><div class="phone"><div class="screen" data-tpl="entry"></div></div></div>
+      <div class="frame-col desk"><span class="frame-cap">桌面</span><div class="browser"><div class="chrome"><i></i><i></i><i></i><span class="url">pasto.example/</span></div><div class="screen" data-tpl="entry"></div></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="sec-room">
+    <div class="sec-head">
+      <span class="eyebrow">4 · 房間頁</span>
+      <h2 id="sec-room">聊天室式的房間</h2>
+      <p>自己的文字靠右、用主色泡泡，其他裝置的文字靠左、用白色泡泡，最新的在最下面，輸入框固定在底部。房碼和「複製邀請」放在上方，QR 收在旁邊的圖示裡；離開、關閉房間收進 ⋯ 選單。按放大鏡可以搜尋，試試輸入「example」或「會議」。桌面版的訊息欄限制在 760px 寬。可以在輸入框打字，看 byte 計數和送出按鈕怎麼變。</p>
+    </div>
+    <div class="frames">
+      <div class="frame-col"><span class="frame-cap">手機 · 360px</span><div class="phone"><div class="screen" data-tpl="room" data-collapsed="true"></div></div></div>
+      <div class="frame-col desk"><span class="frame-cap">桌面</span><div class="browser"><div class="chrome"><i></i><i></i><i></i><span class="url">pasto.example/r/K7Q2MX</span></div><div class="screen" data-tpl="room" data-collapsed="false"></div></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="sec-state">
+    <div class="sec-head">
+      <span class="eyebrow">5 · 狀態提示</span>
+      <h2 id="sec-state">要先決定寫法的提示</h2>
+      <p>這些情境在 S4 驗收裡都要有明確畫面。文字是草稿，重點是每個提示都說清楚發生什麼事、使用者能做什麼。</p>
+    </div>
+    <div class="states">
+      <div class="card state err"><span class="where">/me 回 401 · 身分失效</span><b>這個分頁的身分已失效</b><p>原本的刪除權和房主權無法恢復。要用新身分重新加入 K7Q2MX 嗎？</p><div><button type="button" class="btn ghost sm">以新身分加入</button></div></div>
+      <div class="card state err"><span class="where">404 · 房間關閉或到期</span><b>這個房間已關閉或到期</b><p>房間裡的文字已無法讀取。可以回到首頁建立新房間。</p></div>
+      <div class="card state"><span class="where">sessionStorage 無法使用</span><b>身分只保存在這次開啟的頁面</b><p>瀏覽器不允許保存身分，重新整理後會失去目前身分。</p></div>
+      <div class="card state info"><span class="where">剪貼簿 API 被拒</span><b>無法自動複製</b><p>文字已幫你選取，請按 Ctrl＋C 或長按複製。</p></div>
+      <div class="card state"><span class="where">429 · 請求太頻繁</span><b>操作太頻繁</b><p>請在 12 秒後再試一次。</p></div>
+      <div class="card state info"><span class="where">S4 手動刷新</span><b>其他裝置的新內容不會自動出現</b><p>按「重新整理」取得最新內容。S5 加入即時通知後移除這段說明。</p></div>
+    </div>
+  </section>
+
+</main>
+
+<template id="tpl-entry">
+  <div class="m-nav">
+    <span class="m-logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 11h6M9 15h4"/></svg>Pasto</span>
+    <span class="m-nav-r"><span class="icon-btn" aria-label="切換主題"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span></span>
+  </div>
+  <div class="m-body">
+    <div class="m-hero">
+      <h3>在裝置之間傳文字</h3>
+      <p>開一個房間，用六碼或 QR Code 讓其他裝置加入。不用註冊。</p>
+    </div>
+    <div class="entry-cards">
+      <div class="card entry">
+        <span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span>
+        <h4>建立房間</h4>
+        <p>你會成為房主，可以分享房碼，也可以提前關閉房間。</p>
+        <button type="button" class="btn primary block">建立新房間</button>
+      </div>
+      <div class="card entry join">
+        <span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg></span>
+        <h4>加入房間</h4>
+        <p>輸入其他裝置上顯示的六碼房碼。</p>
+        <div class="code-row"><input class="code-in" maxlength="6" placeholder="K7Q2MX" aria-label="房碼"><button type="button" class="btn ghost">加入</button></div>
+      </div>
+    </div>
+    <p class="hint">房間裡的文字任何知道房碼的人都看得到，請不要放密碼等機密資料。</p>
+  </div>
+</template>
+
+<template id="tpl-room">
+  <div class="chat">
+    <div class="c-head">
+      <span class="c-brand">
+        <span class="c-mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></span>
+        <span class="c-word"><b>Pasto.</b><small>Share instantly.</small></span>
+      </span>
+      <span class="c-head-r">
+        <span class="online"><i></i>3 人在線</span>
+        <button type="button" class="ghost-ico" data-search-btn aria-label="搜尋訊息"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
+        <button type="button" class="ghost-ico" data-menu-btn aria-expanded="false" aria-label="更多選項"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+      </span>
+    </div>
+    <div class="card menu" data-menu hidden>
+      <button type="button" data-theme-toggle><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>切換深淺色</button>
+      <button type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>重新整理</button>
+      <div class="sep"></div>
+      <button type="button" class="dz"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>離開房間</button>
+      <button type="button" class="dz"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>關閉房間<small>房主</small></button>
+    </div>
+    <div class="c-search" data-search hidden>
+      <label class="s-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" data-search-in placeholder="搜尋這個房間的文字" aria-label="搜尋這個房間的文字"><span class="s-count" data-search-count></span></label>
+      <button type="button" class="s-close" data-search-close>取消</button>
+    </div>
+    <div class="c-room">
+      <div><span class="label">目前房間</span><span class="room-code">K7Q2MX</span></div>
+      <div class="c-room-acts">
+        <button type="button" class="ghost-ico" data-qr-btn aria-expanded="false" aria-label="顯示 QR Code"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v7h-7"/></svg></button>
+        <button type="button" class="btn soft"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>複製邀請</button>
+      </div>
+    </div>
+    <div class="qr-panel" data-qr hidden>
+      <div class="qr" aria-label="QR Code 示意"></div>
+      <div style="display:grid;gap:6px;min-width:0"><code>pasto.example/r/K7Q2MX</code><p>用另一台裝置掃描加入。QR 只包含加入連結，掃描的裝置會取得自己的新身分。</p></div>
+    </div>
+    <div class="msgs">
+      <span class="day">今天 19:02</span>
+      <div class="msg other"><span class="who">訪客 A</span><div class="bubble"><pre>會議室投影機：HDMI 2
+簡報檔在 \\fileserver\share\q4-review.pptx</pre></div><div class="msg-foot"><span>19:02</span><button type="button">複製</button></div></div>
+      <div class="msg mine"><span class="who">你</span><div class="bubble"><pre>ssh deploy@10.0.4.21 -p 2222</pre></div><div class="msg-foot"><span>19:05</span><button type="button">複製</button><button type="button" class="del">刪除</button></div></div>
+      <span class="day">今天 19:16</span>
+      <div class="msg other"><span class="who">訪客 A</span><div class="bubble"><pre>這是今天要分享的網址！
+https://example.com/reports/2026-q4.pdf</pre></div><div class="msg-foot"><span>19:16</span><button type="button">複製</button></div></div>
+      <div class="msg mine"><span class="who">你</span><div class="bubble"><pre>收到！我直接在手機打開。</pre></div><div class="msg-foot"><span>剛剛</span><button type="button">複製</button><button type="button" class="del">刪除</button></div></div>
+      <span class="sync-note">其他裝置的新訊息不會自動出現<button type="button">重新整理</button></span>
+      <div class="s-empty" data-search-empty hidden><b>找不到符合的文字</b><span>只會搜尋這個房間目前載入的內容。</span></div>
+    </div>
+    <div class="composer">
+      <div class="comp-box">
+        <textarea data-compose rows="1" placeholder="貼上文字或連結…" aria-label="新增文字"></textarea>
+        <button type="button" class="send" data-send aria-label="送出"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      </div>
+      <span class="bytes" data-bytes hidden>0 / 8,192 bytes</span>
+    </div>
+  </div>
+</template>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  function store(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  // 色彩系統表
+  var TOKENS = [
+    ["Primary", "品牌色：圖示、邊線、焦點框", "#0D9488", "#14B8A6", false],
+    ["Primary Strong", "按鈕、自己的泡泡、主色文字", "#0F766E", "#14B8A6", false],
+    ["Primary Hover", "按鈕滑過（淺色往深一階）", "#115E59", "#2DD4BF", true],
+    ["Background", "頁面底色", "#F8FAFC", "#0B1220", false],
+    ["Surface", "卡片、導覽列", "#FFFFFF", "#172532", false],
+    ["Text", "主要文字", "#152D31", "#F1F5F9", false],
+    ["Border", "邊框、分隔線", "#E2E8F0", "#304250", false],
+    ["Surface 2", "輸入區、次要底色", "#F1F5F9", "#1E3040", true],
+    ["Text Muted", "次要文字、說明", "#4A6166", "#9DAEB9", true],
+    ["Primary Soft", "主色淡底、圖示底", "#E0F2F0", "#123634", true],
+    ["On Primary", "主色上的文字", "#FFFFFF", "#042F2E", true]
+  ];
+  function sw(c) { return '<span class="tok-sw"><i style="background:' + c + '"></i>' + c + "</span>"; }
+  document.getElementById("tokens").innerHTML =
+    '<div class="tok-row head"><span class="tok-name">用途</span><span>Light</span><span>Dark</span></div>' +
+    TOKENS.map(function (t) {
+      return '<div class="tok-row"><span class="tok-name"><b>' + t[0] + "</b><small>" + t[1] + "</small>" + (t[4] ? '<span class="derived">推導</span>' : "") + "</span>" + sw(t[2]) + sw(t[3]) + "</div>";
+    }).join("");
+
+  function toggleTheme() {
+    var dark = root.getAttribute("data-theme") === "dark" || (!root.hasAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+    setTheme(dark ? "light" : "dark");
+  }
+
+  // 模擬畫面
+  var qrBits = (function () {
+    var n = 21, cells = [], seed = 7;
+    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    function finder(r, c) {
+      var fr = [[0, 0], [0, 14], [14, 0]];
+      for (var i = 0; i < 3; i++) {
+        var dr = r - fr[i][0], dc = c - fr[i][1];
+        if (dr >= 0 && dr < 7 && dc >= 0 && dc < 7) {
+          var edge = dr === 0 || dr === 6 || dc === 0 || dc === 6, core = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4;
+          return edge || core ? 1 : 0;
+        }
+        if (dr >= -1 && dr <= 7 && dc >= -1 && dc <= 7) return 0;
+      }
+      return -1;
+    }
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) {
+      var f = finder(r, c); cells.push(f === -1 ? (rnd() > .52 ? 1 : 0) : f);
+    }
+    return cells;
+  })();
+
+  document.querySelectorAll(".screen[data-tpl]").forEach(function (screen, idx) {
+    var tpl = document.getElementById("tpl-" + screen.dataset.tpl);
+    screen.appendChild(tpl.content.cloneNode(true));
+    screen.querySelectorAll("input, textarea").forEach(function (el, j) { el.id = "m" + idx + "-" + j; });
+    var ta = screen.querySelector("[data-compose]");
+    var qr = screen.querySelector(".qr");
+    if (qr) qr.innerHTML = qrBits.map(function (b) { return b ? '<span class="on"></span>' : "<span></span>"; }).join("");
+    function toggler(btnSel, panelSel) {
+      var btn = screen.querySelector(btnSel), panel = screen.querySelector(panelSel);
+      if (!btn || !panel) return;
+      btn.addEventListener("click", function () { panel.hidden = !panel.hidden; btn.setAttribute("aria-expanded", String(!panel.hidden)); });
+    }
+    toggler("[data-qr-btn]", "[data-qr]");
+    toggler("[data-menu-btn]", "[data-menu]");
+    var tt = screen.querySelector("[data-theme-toggle]");
+    if (tt) tt.addEventListener("click", function () { toggleTheme(); screen.querySelector("[data-menu]").hidden = true; screen.querySelector("[data-menu-btn]").setAttribute("aria-expanded", "false"); });
+    var msgs = screen.querySelector(".msgs");
+    if (msgs) requestAnimationFrame(function () { msgs.scrollTop = msgs.scrollHeight; });
+
+    // 搜尋：只在已載入的訊息裡比對，不分大小寫，符合的標亮、其餘隱藏
+    var sBtn = screen.querySelector("[data-search-btn]");
+    if (sBtn) {
+      var sBar = screen.querySelector("[data-search]"), sIn = screen.querySelector("[data-search-in]"),
+          sCount = screen.querySelector("[data-search-count]"), sEmpty = screen.querySelector("[data-search-empty]"),
+          roomBar = screen.querySelector(".c-room"), qrPanel = screen.querySelector("[data-qr]"),
+          others = screen.querySelectorAll(".day, .sync-note"), items = screen.querySelectorAll(".msg");
+      items.forEach(function (m) { var pre = m.querySelector("pre"); pre.dataset.raw = pre.textContent; });
+      var esc = function (s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var run = function () {
+        var q = sIn.value.trim(), ql = q.toLowerCase(), hit = 0;
+        items.forEach(function (m) {
+          var pre = m.querySelector("pre"), raw = pre.dataset.raw;
+          if (!q) { pre.textContent = raw; m.hidden = false; return; }
+          var low = raw.toLowerCase(), out = "", i = 0, j, found = false;
+          while ((j = low.indexOf(ql, i)) !== -1) { out += esc(raw.slice(i, j)) + "<mark>" + esc(raw.slice(j, j + q.length)) + "</mark>"; i = j + q.length; found = true; }
+          out += esc(raw.slice(i));
+          pre.innerHTML = out; m.hidden = !found; if (found) hit++;
+        });
+        others.forEach(function (o) { o.hidden = !!q; });
+        sCount.textContent = q ? hit + " 筆" : "";
+        sEmpty.hidden = !q || hit > 0;
+      };
+      var open = function (on) {
+        sBar.hidden = !on; roomBar.hidden = on; if (on) { qrPanel.hidden = true; sIn.focus(); } else { sIn.value = ""; run(); msgs.scrollTop = msgs.scrollHeight; }
+      };
+      sBtn.addEventListener("click", function () { open(sBar.hidden); });
+      screen.querySelector("[data-search-close]").addEventListener("click", function () { open(false); });
+      sIn.addEventListener("input", run);
+      sIn.addEventListener("keydown", function (e) { if (e.key === "Escape") open(false); });
+    }
+    if (ta) {
+      var bytes = screen.querySelector("[data-bytes]"), send = screen.querySelector("[data-send]"), enc = new TextEncoder();
+      var upd = function () {
+        var n = enc.encode(ta.value).length, over = n > 8192;
+        bytes.hidden = n === 0;
+        bytes.textContent = n.toLocaleString("en-US") + " / 8,192 bytes" + (over ? " · 超過上限" : "");
+        bytes.classList.toggle("over", over);
+        send.disabled = n === 0 || over || !ta.value.trim();
+        ta.style.height = "34px"; ta.style.height = Math.min(132, ta.scrollHeight) + "px";
+      };
+      ta.addEventListener("input", upd);
+      upd();
+    }
+  });
+
+  // 對比計算
+  function hex(c) {
+    c = c.trim(); var m = c.match(/^#([0-9a-f]{6})$/i);
+    if (m) return [0, 2, 4].map(function (i) { return parseInt(m[1].substr(i, 2), 16); });
+    m = c.match(/rgba?\(([^)]+)\)/); if (m) return m[1].split(",").slice(0, 3).map(Number);
+    return [0, 0, 0];
+  }
+  function lum(rgb) { return rgb.map(function (v) { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }).reduce(function (a, v, i) { return a + v * [.2126, .7152, .0722][i]; }, 0); }
+  function ratio(a, b) { var x = lum(hex(a)), y = lum(hex(b)); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); }
+  var pairs = [
+    ["主要文字／背景", "--fg", "--bg"],
+    ["次要文字／卡片", "--fg-muted", "--surface"],
+    ["主色按鈕文字／Strong", "--accent-fg", "--accent-strong"],
+    ["主色按鈕文字／Hover", "--accent-fg", "--accent-hover"],
+    ["主色文字／卡片", "--accent-strong", "--surface"],
+    ["品牌色／卡片（非文字，需 3:1）", "--accent", "--surface", 3],
+    ["危險色文字／卡片", "--danger", "--surface"],
+    ["主要文字／主色淡底", "--fg", "--accent-soft"]
+  ];
+  function renderContrast() {
+    var cs = getComputedStyle(root), rows = "";
+    pairs.forEach(function (p) {
+      var f = cs.getPropertyValue(p[1]), b = cs.getPropertyValue(p[2]), r = ratio(f, b), need = p[3] || 4.5, ok = r >= need;
+      rows += "<tr><td>" + p[0] + "</td><td><span class=\"sample\" style=\"color:var(" + p[1] + ");background:var(" + p[2] + ")\">Pasto 文字 Aa</span></td><td class=\"num\">" + r.toFixed(2) + ":1</td><td><span class=\"chip " + (ok ? "ok" : "bad") + "\">" + (ok ? "通過" : (need > 3 && r >= 3 ? "僅大字通過" : "未通過")) + "</span></td></tr>";
+    });
+    document.getElementById("contrast-body").innerHTML = rows;
+  }
+
+  // 主題切換
+  function setTheme(t) {
+    if (t === "system") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", t);
+    document.querySelectorAll("[data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.themeSet === t)); });
+    store("pasto-draft-theme", t === "system" ? null : t); renderContrast();
+  }
+  document.querySelectorAll("[data-theme-set]").forEach(function (b) { b.addEventListener("click", function () { setTheme(b.dataset.themeSet); }); });
+  document.querySelectorAll(".icon-btn").forEach(function (b) {
+    b.setAttribute("role", "button"); b.tabIndex = 0;
+    b.addEventListener("click", toggleTheme);
+  });
+  try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderContrast); } catch (e) {}
+
+  // Logo 候選
+  var S = 'fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"';
+  var LOGOS = [
+    { id: "layers", name: "疊層", tag: "目前", idea: "兩層卡片疊在一起，代表內容在裝置之間同步。",
+      note: "優點：簡潔、小尺寸也清楚。注意：疊層是很常見的圖示（Buffer、多款工具都用過），辨識度較普通。",
+      svg: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>' },
+    { id: "pdot", name: "P. 字標", tag: "跟字標一致", idea: "大寫 P 加句點，直接取自「Pasto.」字標的頭尾。",
+      note: "優點：和字標完全一致，最穩、最耐看。注意：個性較少，主要靠字體和顏色撐起辨識度。",
+      svg: '<path d="M7 20V4h5.5a4.5 4.5 0 0 1 0 9H7"/><circle cx="18" cy="18.4" r="1.7" fill="currentColor" stroke="none"/>' }
+  ];
+  function icon(l) { return '<svg viewBox="0 0 24 24" ' + S + ' aria-hidden="true">' + l.svg + "</svg>"; }
+  var logoWrap = document.getElementById("logos");
+  logoWrap.innerHTML = LOGOS.map(function (l) {
+    var t = icon(l), g = l.grad ? " grad" : "";
+    return '<button type="button" class="logo-card" data-logo="' + l.id + '" aria-pressed="false">' +
+      '<div class="lg-stage"><span class="tile t72' + g + '">' + t + '</span><span class="lg-sizes"><span class="tile t40' + g + '">' + t + '</span><span class="tile t24' + g + '">' + t + '</span><span class="tile t16' + g + '">' + t + "</span></span></div>" +
+      '<div class="lg-body"><h3><span>' + l.name + (l.tag === "目前" ? ' <span class="cur-tag">目前</span>' : "") + "</span><small>" + (l.tag === "目前" ? "" : l.tag) + "</small></h3>" +
+      '<div class="lockup"><span class="tile t40' + g + '">' + t + '</span><span class="c-word"><b>Pasto.</b><small>Share instantly.</small></span></div>' +
+      "<p>" + l.idea + '</p><p class="note">' + l.note + "</p></div></button>";
+  }).join("");
+  function setLogo(id) {
+    var l = LOGOS.filter(function (x) { return x.id === id; })[0] || LOGOS[0];
+    document.querySelectorAll(".c-mark").forEach(function (m) { m.classList.toggle("grad", !!l.grad); m.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" ' + S + ' aria-hidden="true">' + l.svg + "</svg>"; });
+    document.querySelectorAll(".m-logo svg").forEach(function (m) { m.outerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" ' + S + ' aria-hidden="true">' + l.svg.replace('stroke="var(--accent)"', 'stroke="var(--surface)"') + "</svg>"; });
+    document.querySelectorAll("[data-logo]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.logo === l.id)); });
+    store("pasto-draft-logo", l.id);
+  }
+  document.querySelectorAll("[data-logo]").forEach(function (b) { b.addEventListener("click", function () { setLogo(b.dataset.logo); }); });
+  setLogo(load("pasto-draft-logo") || "layers");
+
+  var savedT = load("pasto-draft-theme"); setTheme(savedT === "light" || savedT === "dark" ? savedT : "system");
+})();
+</script>
+
+</body></html>
