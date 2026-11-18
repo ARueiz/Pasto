@@ -8,9 +8,32 @@ internal static class ItemEndpoints
 {
     public const string AddName = "AddItem";
     public const string DeleteName = "DeleteOwnItem";
+    public const string SnapshotName = "GetItemSnapshot";
 
-    public static void MapItemWrites(this WebApplication app)
+    public static void MapItems(this WebApplication app)
     {
+        app.MapGet("/api/rooms/{roomId:guid}/items", async (Guid roomId, HttpContext context, GetItemSnapshot get,
+            CancellationToken cancellationToken) =>
+        {
+            var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
+            var snapshot = await get.ExecuteAsync(roomId, identity.ParticipantId, cancellationToken);
+            return Results.Ok(new
+            {
+                items = snapshot.Items.Select(item => new
+                {
+                    item.Id,
+                    item.Content,
+                    item.CreatedAt,
+                    createdVersion = item.CreatedVersion.ToString(CultureInfo.InvariantCulture),
+                    item.IsOwn,
+                    canDelete = item.IsOwn
+                }),
+                snapshot.ItemCount,
+                snapshotVersion = snapshot.Version.ToString(CultureInfo.InvariantCulture),
+                snapshot.ExpiresAt
+            });
+        }).WithName(SnapshotName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
+
         app.MapPost("/api/rooms/{roomId:guid}/items", async (Guid roomId, AddItemRequest request,
             HttpContext context, AddItem add, CancellationToken cancellationToken) =>
         {

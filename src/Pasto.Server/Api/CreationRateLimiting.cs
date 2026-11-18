@@ -30,7 +30,8 @@ internal static class CreationRateLimiting
             ParticipantEndpoints.JoinName => ("join", settings.JoinPerIp, settings.JoinGlobal),
             // DELETE 同樣須先保護憑證查詢，但不耗 Participant 的讀取配額。
             ParticipantEndpoints.MeName or RoomEndpoints.StateName or RoomEndpoints.CloseName
-                or ItemEndpoints.AddName or ItemEndpoints.DeleteName => ("read", settings.ReadPerIp, settings.ReadGlobal),
+                or ItemEndpoints.AddName or ItemEndpoints.DeleteName or ItemEndpoints.SnapshotName
+                => ("read", settings.ReadPerIp, settings.ReadGlobal),
             _ => null
         };
 
