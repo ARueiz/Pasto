@@ -8,6 +8,7 @@ namespace Pasto.IntegrationTests;
 internal sealed class PostgresTestDatabase : IAsyncDisposable
 {
     private readonly string connectionString;
+    private readonly NpgsqlDataSource dataSource;
     private readonly string schemaName = $"pasto_it_{Guid.NewGuid():N}";
 
     private PostgresTestDatabase(string configuredConnection)
@@ -22,12 +23,17 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         }
 
         builder.SearchPath = schemaName;
-        builder.Pooling = false;
+        // 每個 fixture 擁有獨立且有界的 pool；不共用全域 connection-string pool。
+        builder.Pooling = true;
+        builder.MinPoolSize = 0;
+        builder.MaxPoolSize = 16;
+        builder.NoResetOnClose = false;
         builder.Timeout = 5;
         builder.CommandTimeout = 10;
         builder.IncludeErrorDetail = false;
         builder.LogParameters = false;
         connectionString = builder.ConnectionString;
+        dataSource = NpgsqlDataSource.Create(connectionString);
     }
 
     public string SchemaName => schemaName;
@@ -45,16 +51,20 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         }
 
         var database = new PostgresTestDatabase(configuredConnection);
-        await using var connection = new NpgsqlConnection(database.connectionString);
-        await connection.OpenAsync();
-        database.ServerVersion = connection.PostgreSqlVersion.ToString();
-        // schema 名稱僅由固定前綴與 GUID 產生，不接受外部輸入。
-        // 先建立隔離空間，再讓正式 Migrator 管理自己的交易與 migration lock。
-        await using var create = new NpgsqlCommand(
-            $"CREATE SCHEMA \"{database.schemaName}\"", connection);
-        await create.ExecuteNonQueryAsync();
+        var schemaCreated = false;
         try
         {
+            await using (var connection = await database.dataSource.OpenConnectionAsync())
+            {
+                database.ServerVersion = connection.PostgreSqlVersion.ToString();
+                // schema 名稱僅由固定前綴與 GUID 產生，不接受外部輸入。
+                // 先建立隔離空間，再讓正式 Migrator 管理自己的交易與 migration lock。
+                await using var create = new NpgsqlCommand(
+                    $"CREATE SCHEMA \"{database.schemaName}\"", connection);
+                await create.ExecuteNonQueryAsync();
+                schemaCreated = true;
+            }
+            // 建 schema 的 lease 先歸還，Migration 可直接重用，不預先佔用第二條連線。
             await using var context = database.CreateContext();
             await context.Database.MigrateAsync();
             return database;
@@ -64,7 +74,8 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             // Migrate 失敗時，await using 尚未接管 database，必須在這裡清自己的 schema。
             try
             {
-                await database.DisposeAsync();
+                if (schemaCreated) await database.DisposeAsync();
+                else await database.dataSource.DisposeAsync();
             }
             catch (Exception cleanupError)
             {
@@ -79,7 +90,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     {
         // All unqualified table names resolve only to this test's isolated schema.
         var options = new DbContextOptionsBuilder<PastoDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql(dataSource)
             .AddInterceptors(interceptors)
             .Options;
         return new PastoDbContext(options);
@@ -97,7 +108,11 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await using var connection = new NpgsqlConnection(connectionString);
+        // 先關閉此 fixture 的 pool；清理連線不入池，避免留下指向已刪 schema 的閒置 session。
+        // 呼叫端仍須先釋放所有 context／交易及 HTTP host。
+        await dataSource.DisposeAsync();
+        var cleanupConnection = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false };
+        await using var connection = new NpgsqlConnection(cleanupConnection.ConnectionString);
         await connection.OpenAsync();
         // Only the generated schema is removed; never call EnsureDeleted on the database.
         await using var cleanup = new NpgsqlCommand($"DROP SCHEMA \"{schemaName}\" CASCADE", connection);

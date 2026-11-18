@@ -61,6 +61,7 @@ builder.Services.AddScoped<GetParticipant>();
 builder.Services.AddScoped<IRoomStateStore, RoomStateStore>();
 builder.Services.AddScoped<GetRoomState>();
 builder.Services.AddSingleton<ParticipantReadLimiter>();
+builder.Services.AddSingleton<ParticipantWriteLimiter>();
 builder.Services.AddAuthentication(ParticipantAuthenticationHandler.SchemeName)
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ParticipantAuthenticationHandler>(
         ParticipantAuthenticationHandler.SchemeName, _ => { });
@@ -74,6 +75,8 @@ builder.Services.AddScoped<IRoomCreationStore, RoomCreationStore>();
 builder.Services.AddScoped<CreateRoom>();
 builder.Services.AddScoped<IItemAdditionStore, ItemAdditionStore>();
 builder.Services.AddScoped<AddItem>();
+builder.Services.AddScoped<IItemSnapshotStore, ItemSnapshotStore>();
+builder.Services.AddScoped<GetItemSnapshot>();
 builder.Services.AddScoped<IItemDeletionStore, ItemDeletionStore>();
 builder.Services.AddScoped<DeleteOwnItem>();
 builder.Services.AddScoped<IRoomClosureStore, RoomClosureStore>();
@@ -92,6 +95,7 @@ app.UseAuthorization();
 app.MapRoomCreation();
 app.MapParticipants();
 app.MapRoomStateAndClosure();
+app.MapItems();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
 

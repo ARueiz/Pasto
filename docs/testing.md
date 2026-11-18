@@ -1,5 +1,73 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S3-02 文字快照驗證（2026-11-18）
+
+- 完整 Release 回歸 278 passed／0 failed／0 skipped（`s3-02-full.trx`）。
+- Release Build 0 warning／0 error，format verify 通過。相關 `ItemSnapshotApiTests` 9 passed／0 failed／0 skipped（`s3-02-related-verified.trx`）。首輪 7 passed／2 failed（`s3-02-related.trx`）：兩個測試攔截器使用 `items` 而非實際的 `clipboard_items`，未觸發並行檢查與 EXPLAIN。修正測試的資料表比對，未改產品行為或放寬斷言。
+- 滿房經正式 `AddItem` 建立 300 筆各 8192 UTF-8 bytes 的 CJK 文字，逐筆比對順序與內容。這組輸入的 HTTP JSON 回應本體實測 2,503,752 bytes，數字包含欄位與 JSON 編碼，會隨內容與時間格式而變動。
+- 最壞情況估算：`AddItem` 允許 `U+0001`，審查方用獨立 .NET 10 程式確認 ASP.NET Core 預設 JSON 會將這個 1 byte 字元輸出為 6 bytes 的 `\u0001`。滿房若每筆 8192 bytes 都是這類字元，文字內容的 JSON 編碼為 `300 × 8192 × 6 = 14,745,600 bytes`，加上欄位後回應約 14.8 MB。這是推算值，尚未透過 API 實測。S7 量測這類滿房回應本體與讀取配額下的頻寬，S8 納入 1,000 條連線同時重抓的情境。
+- 對實際 EF SQL 執行 EXPLAIN。單房測試資料的預設計畫使用 `ix_items_owner` 的 Bitmap Index Scan 再排序。測試以交易內設定排除 sequential scan 與 bitmap scan，確認同一查詢可透過 `ix_items_order` 依 RoomId 篩選且無需 Sort。產品未限制 PostgreSQL 選擇計畫，代表性資料的計畫與多連線負載仍待後續驗證。
+
+## S3-02 審查方獨立 review 與實測（2026-11-18）
+
+- 審查方（Claude）在 `a05d87f` 驗證 `df2510d..a05d87f`，工作目錄只有四份文件有未提交修改。無阻擋問題，唯一非阻擋 P3 為滿房 JSON 大小的最壞情況估算已補在上節。
+- Release Build 0 warning／0 error，`dotnet format --verify-no-changes` exit 0，殘留 `pasto_it_*` schema 為 0。相關測試 12 例通過（快照 9 例、連線池 3 例），完整測試同一命令緊接兩輪各 278 passed／0 failed／0 skipped，各約 13 秒。
+- 已核對三份 TRX 的計數：`s3-02-claude-review-related.trx`、`s3-02-claude-review-full-1.trx`、`s3-02-claude-review-full-2.trx`，皆位於 `tests/Pasto.IntegrationTests/TestResults/`。
+- 尚未驗證：滿房控制字元的實際 HTTP 回應大小、將交易改成 READ COMMITTED 後一致性測試的結果、1,000 條連線同時重抓的負載。
+
+## S3-01 P3 測試補強（2026-11-18）
+
+- 改用交易外的 `SET lock_timeout`。測試確認設定值先改變，並斷言重新借用同一個 PostgreSQL backend 後恢復為原值。
+- Release Build 0 warning／0 error，format verify 通過，相關 3 例（`s3-01-pool-p3-related.trx`）與完整 269 例（`s3-01-pool-p3-full.trx`）皆通過，0 failed／0 skipped。
+
+## S3-01 審查方獨立 review 與實測（2026-11-18）
+
+- 審查方（Claude）審查 `408593e..ad5ff82`，重點為 `ad5ff82` 測試設施修正；在 `feature/s3-01-item-write-api` 的 `da98a83`（僅文件晚於 `ad5ff82`）、乾淨工作目錄上獨立執行。
+- 結論：無 P0／P1／P2，無 Blocking Issue。確認每個 fixture 自有 pool、歸還時 DISCARD ALL 後 search_path 仍為連線啟動參數、先關 pool 再以不入池連線 DROP schema、初始化失敗依 `schemaCreated` 分流清理；API host 的 NpgsqlDataSource 由 host 釋放，`await using` 逆序保證先於 fixture 釋放；直接使用 fixture 的最大並行為 8，未超過 MaxPoolSize 16。
+- P3（非阻擋）：`TestDatabasePoolingTests.SequentialContexts_ReuseBackend_AndResetSessionAndTransactionSettings` 的 `SET LOCAL lock_timeout` 在交易 rollback 時即還原，即使 `NoResetOnClose=true` 也會通過，無法驗證 pool reset；session reset 實際只由 `application_name` 驗證。建議改為交易外的 session 層級 SET，或移除該段並使測試名稱符合實際驗證內容。尚未修正。
+- `docker compose up -d --wait`：PostgreSQL healthy。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error。
+- 相關 `--filter FullyQualifiedName~TestDatabasePoolingTests`：3 passed／0 failed／0 skipped。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 同一命令緊接兩輪：各 269 passed／0 failed／0 skipped，各約 12 秒。
+- 測試後 `pasto_it_*` schema 為 0；`pasto_test` 僅剩查詢用的 1 條 psql 連線。`dotnet format Pasto.slnx --verify-no-changes --no-restore`：exit 0。
+- TRX：`s3-01-claude-review-related.trx`、`s3-01-claude-review-full-1.trx`／`-2.trx`，位於被忽略的 `tests/Pasto.IntegrationTests/TestResults`。
+- 未執行：TIME_WAIT 取樣（4837 → 544 為實作方紀錄，未由審查方重測）、刻意重現 port 耗盡。
+
+## S3-01 審查修正：測試連線池（2026-11-18）
+
+PostgresTestDatabase 改為每個 fixture 擁有一個 NpgsqlDataSource，Pooling=true、MinPoolSize=0、MaxPoolSize=16、NoResetOnClose=false。context／正式 use case 共用該 fixture 的 pool；schema 仍逐測試隔離。初始化先歸還建 schema 的 lease，再做正式 Migration；Dispose 先關閉自有 data source，再用一條不入池的連線 DROP 自有 schema。不使用 ClearAllPools，也不改正式 Program 的連線設定或測試併發程度。
+
+新增 TestDatabasePoolingTests 3 例：確認連續 context 重用 backend 並重設 session／交易設定，同時持有的 context PID 不同且 search_path 隔離，以及 dispose 後 idle backend 結束、只有自有 schema 被刪。既有鎖競爭測試的 pg_blocking_pids 斷言保持原樣。
+
+同一台 Windows、相同沙箱外執行方式，以 netstat 每約 500 ms 取樣遠端 port 55432 的 TIME_WAIT；峰值是取樣最大值，不宣稱捕捉到所有瞬間峰值。修改後最後兩輪在同一命令中緊接執行，沒有等待 TIME_WAIT 退完。
+
+| 執行 | 通過／失敗／略過 | 測試耗時 | TIME_WAIT 開始／峰值／結束 |
+| --- | --- | --- | --- |
+| 修改前基準 | 266／0／0 | 約 20 秒 | 0／4837／4837 |
+| 修改後連續第 1 輪 | 269／0／0 | 約 13 秒 | 0／544／544 |
+| 修改後連續第 2 輪 | 269／0／0 | 約 13 秒 | 544／1088／1088 |
+
+資料支持「停用 pooling 造成大量短連線與 TIME_WAIT 壓力」的機制與修正效果；本輪未刻意重現先前的 port 耗盡，因此仍不宣稱已排除所有可能根因。測試後殘留 pasto_it_* schema 為 0。
+
+實際執行 Release build（0 warning／0 error）、format 與 format verify、diff check。相關測試 11 例通過；修正後另兩次完整測試也均為 269 passed，但因工具等待讓 TIME_WAIT 歸零，以上表的緊接兩輪作為連續執行證據。完整測試命令沿用 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，加上各輪 TRX logger。
+
+保留的失敗／量測工具紀錄：第一輪相關測試為 10 passed／1 failed，重用測試拿到不同 PID；原因是初始化同時保留建 schema 與 Migration 的兩條連線。已先歸還初始化 lease，斷言未放寬，後續 11 例通過。基準量測包裝程式曾因無法取得 Process.ExitCode 而回傳 1，但 TRX 是 Completed、266 passed；後續包裝程式改以 TRX outcome／counters 判定，不將工具狀態誤列為測試失敗。
+
+TRX 與取樣 JSON／stdout／stderr 保存在被忽略的 TestResults：s3-01-pool-baseline、s3-01-pool-related（失敗）、s3-01-pool-related-fixed、s3-01-pool-fixed-full-1／2、s3-01-pool-consecutive-1／2。本輪已由審查方獨立 review（見上節），未開始 S3-02。以下保留先前交付的歷史紀錄。
+
+## S3-01 驗證紀錄（2026-11-18）
+
+新增 ItemWriteApiTests 38 例（34 個真 DB，含 3 個真 Kestrel；4 個不連 DB）。覆蓋原文保留、8192／8193 UTF-8 bytes、空白／NUL／不成對 surrogate、拒絕授權欄位、401／403／404／409、重複刪除、Participant 新增／刪除配額分離、關房共用刪除配額、驗證前粗限流、提交前／後故障與不重試。300 筆前置資料透過正式 AddItem 建立。
+
+- 首次 Build 曾失敗：新測試直接組裝 CreateRoom 時漏帶 logger；已改用既有 TestRoomCreation helper，後續 Release Build 為 0 warning／0 error。
+- 初版相關 32 例通過，TRX：s3-01-related.trx。補齊容量、真 Kestrel 與設定測試後共 38 例。
+- 首次完整套件：265 passed／1 failed／0 skipped，TRX：s3-01-full.trx。失敗為既有 ParticipantApiTests.LastParticipantSlot_TwoHttpRequestsOnlyOneCommits_Then1001stIs409，在正式 Join 前置資料建立時發生 NpgsqlException → SocketException：「一次只能用一個通訊端位址」。
+- 觀察本機對 55432 約 8,600 個 TIME_WAIT，降到約 3,300 後重跑：264 passed／2 failed／0 skipped，TRX：s3-01-full-after-port-release.trx。同一既有測試及新增 FullRoom_Returns409_WithoutChangingCounters 的前置資料建立發生相同 socket 錯誤。未修改正式交易、測試斷言或測試資料建立方式來繞過錯誤。
+- 這是連線建立失敗；TIME_WAIT 壓力是觀察到的環境線索，尚不能僅據此宣稱已確認所有根因。兩次失敗紀錄均保留於測試專案內被忽略的 TestResults 目錄。
+- 後續觀察：沒有其他測試程序同時執行；TIME_WAIT 已降至約 600。以沙箱外環境獨立執行相關測試，38 passed／0 failed／0 skipped，約 10 秒（s3-01-related-isolated.trx）。同環境完整回歸 266 passed／0 failed／0 skipped，約 21 秒（s3-01-full-unrestricted.trx）。測試後殘留 schema 為 0。執行權限與連線壓力均有變化，不能據此單獨認定任一項為唯一根因；沒有修改測試隔離、連線池設定或併發斷言。
+
+執行命令：`dotnet build Pasto.slnx -c Release --no-restore`、`dotnet test Pasto.slnx -c Release --no-build --no-restore --logger 'trx;LogFileName=…'`；初版相關測試另加 `--filter FullyQualifiedName~ItemWriteApiTests`。已執行 dotnet format 及 `--verify-no-changes`。S3-02 快照列表與 S8 壓測尚未執行，S3-01 待獨立 review。以下 S2 紀錄為歷史結果。
+
 S2-03 實測（2026-11-18）：新增 RoomStateApiTests 33 例（29 個真 DB、4 個不連 DB）。涵蓋 metadata 契約與快照一致性、Bearer／同房／權限／有效性順序、兩層共用限流、驗證後被清理的競爭、HTTP 併發關房、commit 前回滾與 commit 後結果不確定。併發關房以 pg_blocking_pids 確認等鎖；既有 HTTP 提交故障 hook 搬至 TransactionTestHooks 共用，未改行為。
 
 本輪實際執行 Release build、相關測試、完整測試、format 與 format verify、git diff --check。Build 0 warning／0 error；相關 33 passed、完整 228 passed，皆 0 failed／0 skipped；測試後 pasto_it_* schema 為 0。測試命令使用 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，相關套件另加 `--filter FullyQualifiedName~RoomStateApiTests`。TRX 分別為 TestResults/s2-03-related.trx 與 s2-03-full.trx（測試專案內，已忽略）。本輪沒有測試失敗；未執行 S8 負載測試，S2-03 尚待獨立 review，不將實作方結果描述為審查方證據。
@@ -49,7 +117,7 @@ dotnet test Pasto.slnx --configuration Release --no-build --no-restore
 dotnet format Pasto.slnx --no-restore --verify-no-changes
 ```
 
-目前共 228 個測試，完整通過（164 個真 DB 案例、53 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
+目前共 269 個測試，完整通過（201 個真 DB 案例〔含 3 個真 Kestrel〕、57 個不連 DB 的 HTTP／host 案例〔含 7 個真 Kestrel〕、10 個文字輸入或預先取消、1 個憑證／房碼生成測試）。DB 案例未提供連線／DB 不可用時失敗，不 skip。測試只接受 loopback，且 DB 名稱須以 `_test` 結尾，執行者仍須確認是專用測試 DB。
 
 | 案例 | 驗證內容 |
 | --- | --- |

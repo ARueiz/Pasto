@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace Pasto.Server.Api;
 
-// me 與 metadata 共用同房檢查及同一 Participant read quota。
+// me、metadata 與文字快照共用同房檢查及 Participant 讀取配額。
 public sealed class ParticipantReadFilter(ParticipantReadLimiter limiter, IOptions<ApiOptions> options) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)

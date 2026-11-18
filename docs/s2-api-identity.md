@@ -1,5 +1,7 @@
 # S2：房間 API 與匿名身分
 
+最新狀態：使用者已確認測試審查 OK，完整 S2 已由 PR #5 合併至 main `9eace5f`。下文保留各 patch 當時的交付／審查紀錄。S3-01 接續文字寫入與 DELETE room 的 Participant 刪除配額；S5 處理關房通知，S7 處理既有濫用風險。
+
 基準 main `781470a`。依使用者核准，新增 Microsoft.AspNetCore.Mvc.Testing 測試相依；metadata API 歸 S2，S3 沿用並加入文字 API／快照，不另建平行入口。每個 patch 測試後交獨立 review；目前 S2-03 已實作，待獨立 review，不推送或合併。
 
 ## 已固定的決策

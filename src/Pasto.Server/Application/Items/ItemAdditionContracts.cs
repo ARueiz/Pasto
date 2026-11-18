@@ -8,7 +8,7 @@ public interface IItemAdditionStore
 }
 
 // 不攜帶正文，避免結果的 ToString 或日誌意外暴露內容。
-public sealed record AddedItem(Guid ItemId, long CommittedVersion);
+public sealed record AddedItem(Guid ItemId, long CommittedVersion, DateTime CreatedAt);
 
 public enum ItemContentError { Empty, InvalidUnicode, TooLarge }
 
