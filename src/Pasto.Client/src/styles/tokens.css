@@ -1,0 +1,138 @@
+/*
+ * Pasto design tokens
+ * 來源：Pasto 介面草稿（藍綠色彩系統）
+ *
+ * 用法：
+ *   - 在 main.tsx 匯入一次：import "./styles/tokens.css";
+ *   - 元件一律使用變數，不要寫死色碼。
+ *   - 主題：預設跟隨系統；在 <html> 設 data-theme="light" 或 "dark" 可強制指定。
+ *     localStorage 的 pasto-theme 只存 light / dark；跟隨系統時移除 key。
+ *
+ * 主色用途（淺色模式對比要求）：
+ *   --accent         #0D9488  品牌色：圖示、邊線、焦點框、進度條等「非文字」元素（3:1）
+ *   --accent-strong  #0F766E  按鈕底色、自己的訊息泡泡、主色文字（白字 5.47:1）
+ *   --accent-hover   #115E59  按鈕滑過
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- 色彩：中性 ---- */
+  --bg: #F8FAFC;          /* 頁面底色 */
+  --surface: #FFFFFF;     /* 卡片、導覽列、他人泡泡 */
+  --surface-2: #F1F5F9;   /* 次要底色、hover 底 */
+  --border: #E2E8F0;
+  --fg: #152D31;          /* 主要文字 */
+  --fg-muted: #4A6166;    /* 次要文字、時間、說明 */
+
+  /* ---- 色彩：主色 ---- */
+  --accent: #0D9488;
+  --accent-strong: #0F766E;
+  --accent-hover: #115E59;
+  --accent-soft: #E0F2F0; /* 主色淡底：徽章、圖示底、次要按鈕 */
+  --accent-fg: #FFFFFF;   /* 放在 --accent-strong 上的文字 */
+
+  /* ---- 色彩：狀態 ---- */
+  --danger: #C62828;
+  --danger-soft: #FCEBEB;
+  --highlight: #FDE68A;   /* 搜尋關鍵字標記底色 */
+  --highlight-fg: #152D31;
+  --qr-bg: #FFFFFF;
+  --qr-fg: #152D31;
+  --scrim: rgba(11, 18, 32, .58);
+
+  /* ---- 字體 ---- */
+  --font-ui: "Inter Variable", "Noto Sans TC Variable", system-ui, -apple-system, "Segoe UI", "Microsoft JhengHei", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* ---- 字級（px） ---- */
+  --text-xs: 11px;   /* 標籤、byte 計數 */
+  --text-sm: 12px;   /* 時間、說明、meta */
+  --text-md: 14px;   /* 按鈕、次要內文 */
+  --text-base: 15px; /* 內文、訊息 */
+  --text-lg: 18px;   /* 房碼 */
+  --text-xl: 20px;   /* 字標 */
+  --text-hero: 26px; /* 入口頁標題（桌面 34px） */
+  --text-hero-wide: 34px;
+  --leading: 1.55;
+
+  /* ---- 間距（4px 基準） ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ---- 圓角 ---- */
+  --radius-sm: 8px;    /* 按鈕、輸入框 */
+  --radius-md: 12px;   /* 卡片 */
+  --radius-lg: 14px;   /* 輸入列 */
+  --radius-bubble: 16px;
+  --radius-bubble-tail: 4px;
+  --radius-pill: 999px;
+
+  /* ---- 陰影 ---- */
+  --shadow: 0 1px 2px rgba(21, 45, 49, .06), 0 4px 16px rgba(21, 45, 49, .06);
+
+  /* ---- 版面 ---- */
+  --chat-max-width: 760px; /* 桌面版訊息欄寬度上限 */
+  --bubble-max-width: 78%;
+  --bubble-max-size: 520px;
+  --entry-max-width: 720px;
+  --touch-target: 44px;
+  --icon-size: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0B1220;
+    --surface: #172532;
+    --surface-2: #1E3040;
+    --border: #304250;
+    --fg: #F1F5F9;
+    --fg-muted: #9DAEB9;
+    --accent: #14B8A6;
+    --accent-strong: #14B8A6;
+    --accent-hover: #2DD4BF;
+    --accent-soft: #123634;
+    --accent-fg: #042F2E;
+    --danger: #F47C7C;
+    --danger-soft: #3A1C1E;
+    --shadow: 0 0 0 1px rgba(255, 255, 255, .02);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0B1220;
+  --surface: #172532;
+  --surface-2: #1E3040;
+  --border: #304250;
+  --fg: #F1F5F9;
+  --fg-muted: #9DAEB9;
+  --accent: #14B8A6;
+  --accent-strong: #14B8A6;
+  --accent-hover: #2DD4BF;
+  --accent-soft: #123634;
+  --accent-fg: #042F2E;
+  --danger: #F47C7C;
+  --danger-soft: #3A1C1E;
+  --shadow: 0 0 0 1px rgba(255, 255, 255, .02);
+}
+
+/* 全域基本樣式（可依專案需要移到 base.css） */
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

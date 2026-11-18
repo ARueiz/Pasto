@@ -19,6 +19,7 @@
 | S2 房間／匿名身分 API | 已由 PR #5 合併（9eace5f）；228 例通過，使用者確認測試審查 OK |
 | S3-01 文字寫入與配額 | 已實作，獨立 review 通過，連線池 P3 測試已補強。包含 DELETE room 寫入配額 |
 | S3-02 整份快照列表 | 已實作，獨立 review 無阻擋問題，審查方兩輪完整 278 例通過。見 [S3 工作項](docs/s3-items.md) |
+| S4 基本前端 | 入口頁與房間頁、身分恢復、分享、文字與搜尋、手動刷新。見 [UI 規格](docs/ui-spec.md) 與 [本機啟動與 API](docs/s4-api.md) |
 
 階段規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
