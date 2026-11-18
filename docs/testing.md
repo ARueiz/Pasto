@@ -1,5 +1,38 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S3-02 文字快照驗證（2026-11-18）
+
+- 完整 Release 回歸 278 passed／0 failed／0 skipped（`s3-02-full.trx`）。
+- Release Build 0 warning／0 error，format verify 通過。相關 `ItemSnapshotApiTests` 9 passed／0 failed／0 skipped（`s3-02-related-verified.trx`）。首輪 7 passed／2 failed（`s3-02-related.trx`）：兩個測試攔截器使用 `items` 而非實際的 `clipboard_items`，未觸發並行檢查與 EXPLAIN。修正測試的資料表比對，未改產品行為或放寬斷言。
+- 滿房經正式 `AddItem` 建立 300 筆各 8192 UTF-8 bytes 的 CJK 文字，逐筆比對順序與內容。這組輸入的 HTTP JSON 回應本體實測 2,503,752 bytes，數字包含欄位與 JSON 編碼，會隨內容與時間格式而變動。
+- 最壞情況估算：`AddItem` 允許 `U+0001`，審查方用獨立 .NET 10 程式確認 ASP.NET Core 預設 JSON 會將這個 1 byte 字元輸出為 6 bytes 的 `\u0001`。滿房若每筆 8192 bytes 都是這類字元，文字內容的 JSON 編碼為 `300 × 8192 × 6 = 14,745,600 bytes`，加上欄位後回應約 14.8 MB。這是推算值，尚未透過 API 實測。S7 量測這類滿房回應本體與讀取配額下的頻寬，S8 納入 1,000 條連線同時重抓的情境。
+- 對實際 EF SQL 執行 EXPLAIN。單房測試資料的預設計畫使用 `ix_items_owner` 的 Bitmap Index Scan 再排序。測試以交易內設定排除 sequential scan 與 bitmap scan，確認同一查詢可透過 `ix_items_order` 依 RoomId 篩選且無需 Sort。產品未限制 PostgreSQL 選擇計畫，代表性資料的計畫與多連線負載仍待後續驗證。
+
+## S3-02 審查方獨立 review 與實測（2026-11-18）
+
+- 審查方（Claude）在 `a05d87f` 驗證 `df2510d..a05d87f`，工作目錄只有四份文件有未提交修改。無阻擋問題，唯一非阻擋 P3 為滿房 JSON 大小的最壞情況估算已補在上節。
+- Release Build 0 warning／0 error，`dotnet format --verify-no-changes` exit 0，殘留 `pasto_it_*` schema 為 0。相關測試 12 例通過（快照 9 例、連線池 3 例），完整測試同一命令緊接兩輪各 278 passed／0 failed／0 skipped，各約 13 秒。
+- 已核對三份 TRX 的計數：`s3-02-claude-review-related.trx`、`s3-02-claude-review-full-1.trx`、`s3-02-claude-review-full-2.trx`，皆位於 `tests/Pasto.IntegrationTests/TestResults/`。
+- 尚未驗證：滿房控制字元的實際 HTTP 回應大小、將交易改成 READ COMMITTED 後一致性測試的結果、1,000 條連線同時重抓的負載。
+
+## S3-01 P3 測試補強（2026-11-18）
+
+- 改用交易外的 `SET lock_timeout`。測試確認設定值先改變，並斷言重新借用同一個 PostgreSQL backend 後恢復為原值。
+- Release Build 0 warning／0 error，format verify 通過，相關 3 例（`s3-01-pool-p3-related.trx`）與完整 269 例（`s3-01-pool-p3-full.trx`）皆通過，0 failed／0 skipped。
+
+## S3-01 審查方獨立 review 與實測（2026-11-18）
+
+- 審查方（Claude）審查 `408593e..ad5ff82`，重點為 `ad5ff82` 測試設施修正；在 `feature/s3-01-item-write-api` 的 `da98a83`（僅文件晚於 `ad5ff82`）、乾淨工作目錄上獨立執行。
+- 結論：無 P0／P1／P2，無 Blocking Issue。確認每個 fixture 自有 pool、歸還時 DISCARD ALL 後 search_path 仍為連線啟動參數、先關 pool 再以不入池連線 DROP schema、初始化失敗依 `schemaCreated` 分流清理；API host 的 NpgsqlDataSource 由 host 釋放，`await using` 逆序保證先於 fixture 釋放；直接使用 fixture 的最大並行為 8，未超過 MaxPoolSize 16。
+- P3（非阻擋）：`TestDatabasePoolingTests.SequentialContexts_ReuseBackend_AndResetSessionAndTransactionSettings` 的 `SET LOCAL lock_timeout` 在交易 rollback 時即還原，即使 `NoResetOnClose=true` 也會通過，無法驗證 pool reset；session reset 實際只由 `application_name` 驗證。建議改為交易外的 session 層級 SET，或移除該段並使測試名稱符合實際驗證內容。尚未修正。
+- `docker compose up -d --wait`：PostgreSQL healthy。
+- `dotnet build Pasto.slnx -c Release --no-restore`：0 warning／0 error。
+- 相關 `--filter FullyQualifiedName~TestDatabasePoolingTests`：3 passed／0 failed／0 skipped。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 同一命令緊接兩輪：各 269 passed／0 failed／0 skipped，各約 12 秒。
+- 測試後 `pasto_it_*` schema 為 0；`pasto_test` 僅剩查詢用的 1 條 psql 連線。`dotnet format Pasto.slnx --verify-no-changes --no-restore`：exit 0。
+- TRX：`s3-01-claude-review-related.trx`、`s3-01-claude-review-full-1.trx`／`-2.trx`，位於被忽略的 `tests/Pasto.IntegrationTests/TestResults`。
+- 未執行：TIME_WAIT 取樣（4837 → 544 為實作方紀錄，未由審查方重測）、刻意重現 port 耗盡。
+
 ## S3-01 審查修正：測試連線池（2026-11-18）
 
 PostgresTestDatabase 改為每個 fixture 擁有一個 NpgsqlDataSource，Pooling=true、MinPoolSize=0、MaxPoolSize=16、NoResetOnClose=false。context／正式 use case 共用該 fixture 的 pool；schema 仍逐測試隔離。初始化先歸還建 schema 的 lease，再做正式 Migration；Dispose 先關閉自有 data source，再用一條不入池的連線 DROP 自有 schema。不使用 ClearAllPools，也不改正式 Program 的連線設定或測試併發程度。
@@ -20,7 +53,7 @@ PostgresTestDatabase 改為每個 fixture 擁有一個 NpgsqlDataSource，Poolin
 
 保留的失敗／量測工具紀錄：第一輪相關測試為 10 passed／1 failed，重用測試拿到不同 PID；原因是初始化同時保留建 schema 與 Migration 的兩條連線。已先歸還初始化 lease，斷言未放寬，後續 11 例通過。基準量測包裝程式曾因無法取得 Process.ExitCode 而回傳 1，但 TRX 是 Completed、266 passed；後續包裝程式改以 TRX outcome／counters 判定，不將工具狀態誤列為測試失敗。
 
-TRX 與取樣 JSON／stdout／stderr 保存在被忽略的 TestResults：s3-01-pool-baseline、s3-01-pool-related（失敗）、s3-01-pool-related-fixed、s3-01-pool-fixed-full-1／2、s3-01-pool-consecutive-1／2。本輪尚待獨立 review，未開始 S3-02。以下保留先前交付的歷史紀錄。
+TRX 與取樣 JSON／stdout／stderr 保存在被忽略的 TestResults：s3-01-pool-baseline、s3-01-pool-related（失敗）、s3-01-pool-related-fixed、s3-01-pool-fixed-full-1／2、s3-01-pool-consecutive-1／2。本輪已由審查方獨立 review（見上節），未開始 S3-02。以下保留先前交付的歷史紀錄。
 
 ## S3-01 驗證紀錄（2026-11-18）
 

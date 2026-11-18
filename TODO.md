@@ -6,12 +6,12 @@
 
 | 項目 | 狀態 |
 | --- | --- |
-| 目前分支 | `feature/s3-01-item-write-api` |
+| 目前分支 | `feature/s3-02-item-snapshot`，由 `feature/s3-01-item-write-api` 的 `df2510d` 接續 |
 | 已合併基準 | `main` 的 `9eace5f`，PR #5：完整 S2 |
 | S3-01 功能提交 | `408593e`：文字新增／刪除 API 與 Participant 寫入配額 |
-| 最新程式提交 | `ad5ff82`：測試連線池與清理修正 |
+| S3-01 P3 修正 | `df2510d`：補強連線池設定重設驗證 |
 | 遠端狀態 | S3 尚未推送、開 PR 或合併 |
-| 當前交付點 | `ad5ff82` 的獨立 review，範圍 `408593e..ad5ff82` |
+| 當前交付點 | S3-02 獨立 review 已完成，無阻擋問題，P3 已補文件。審查範圍 `df2510d..a05d87f` |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -21,8 +21,9 @@
 - [x] S2：建房、Join、Bearer、me、metadata、關房 API，已合併；使用者已確認測試審查 OK。
 - [x] S3-01 實作：POST／DELETE items；新增與刪除配額分開，DELETE room 與刪除文字共用刪除配額。
 - [x] S3-01 review finding 修正：fixture 改用自有、有上限的 NpgsqlDataSource pool，先關 pool 再清獨立 schema；新增 3 例回歸測試。
-- [ ] S3-01 修正的獨立 review／審查方驗證。產品程式審查無阻擋問題；測試設施修正仍待確認。
-- [ ] S3-02：整份文字快照列表，尚未開始。
+- [x] S3-01 修正的獨立 review／審查方驗證：無 P0～P2；非阻擋 P3 已補強測試。
+- [x] S3-02 實作：整份文字快照列表、唯讀交易與既有讀取配額。
+- [x] S3-02 獨立 review：無阻擋問題，P3 補記最壞回應大小估算與後續量測。
 - [ ] S4：基本前端 UI。
 - [ ] S5：SignalR 通知與同步驗收。
 - [ ] S6：到期／關房資料清理。
@@ -31,7 +32,15 @@
 
 ## 最新驗證
 
-以下為實作方結果，尚非修正後的獨立審查證據：
+S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全部通過。Release Build、格式檢查通過，殘留 schema 0。TRX 核對結果見 [測試紀錄](docs/testing.md)。
+
+審查方（Claude）獨立重跑，2026-11-18，`da98a83`：
+
+- Release Build 0 warning／0 error；format verify 通過。
+- 相關 `TestDatabasePoolingTests` 3 passed；同一命令緊接兩輪完整測試各 **269 passed、0 failed、0 skipped**。
+- 殘留 schema 0。未重測 TIME_WAIT，以下取樣數字仍為實作方紀錄。
+
+實作方結果：
 
 - Release Build：0 warning、0 error；format verify、diff check 通過。
 - 相關連線池／併發測試：11 例通過。
@@ -44,20 +53,14 @@
 
 ## 下一個工作
 
-**下一個對話的角色**：Claude Code 以 Reviewer 身分獨立審查 `408593e..ad5ff82`，重點為測試設施修正（fixture 連線池、schema 清理、3 例回歸測試）；產品程式先前審查無阻擋問題。Review 結果尚未產生，完成後記錄於本檔與 [S3 工作項](docs/s3-items.md)。在使用者明確核准前，任何 Agent 都不得開始實作 S3-02。
-
-1. 先確認 `ad5ff82` 的 review 結果；有 finding 時先驗證並處理，不跳過交付點開始 S3-02。
-2. 使用者核准後，由 Implementation Agent 依 [S3 工作項](docs/s3-items.md) 實作 GET `/api/rooms/{roomId}/items`。
-3. 共用 read admission 與 Participant 讀取配額；以唯讀 REPEATABLE READ 取得一致的房間狀態與全部文字，版本以字串回傳。
-4. 排序為 `CreatedVersion DESC, Id DESC`；不做分頁、cursor、單筆 GET 或內容截斷。
-5. 驗證空房、授權／失效、跨房隔離、寫入競爭與快照一致性；300×8 KiB 資料經正式 AddItem 建立，量測回應大小並檢查排序索引。
-6. 完成小 patch、測試與本機提交後交獨立 review，更新本檔及驗證紀錄。
+S3-02 已完成獨立審查。下一個工作項為 S4 基本前端 UI。S3-01 的非阻擋 P3 修正保留於 `df2510d`，S3-02 的最壞回應估算及審查證據見 [測試紀錄](docs/testing.md)。
 
 ## 後續必須保留的事項
 
 - S5：新增／刪除／關房的通知只能在提交成功後發送；依既定同步契約驗收，重新連線由 Server 重新同步。
 - S7：少數來源可耗盡共用的驗證前 read admission，影響讀取，也會阻擋新增文字、刪除文字與關房。Participant 寫入配額不會緩解此入口風險。
 - S7：持有分享連結者可反覆 Join 耗盡 1,000 個生命週期 Participant 名額。
+- S7／S8：實測以控制字元填滿 300 筆時的 JSON 回應大小與讀取頻寬。S8 另測 1,000 條連線同時重抓。
 - **S7 防護補齊前不得公開部署**；已記錄風險不代表已緩解，不自行調整既定配額。
 
 ## 文件入口與維護
