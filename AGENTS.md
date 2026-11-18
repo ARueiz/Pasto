@@ -86,6 +86,7 @@ Agent 執行任務時，應遵循以下原則：
 7. 詳細設計以現有文件為準，不複製到本文件。
 
 重要文件：
+- TODO.md（目前進度與下一步入口，開工前先讀）
 - docs/requirements.md
 - docs/architecture.md
 - docs/decisions/（若存在）
