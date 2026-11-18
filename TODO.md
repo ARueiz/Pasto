@@ -6,11 +6,11 @@
 
 | 項目 | 狀態 |
 | --- | --- |
-| 目前分支 | `feature/s3-02-item-snapshot`，由 `feature/s3-01-item-write-api` 的 `df2510d` 接續 |
-| 已合併基準 | `main` 的 `9eace5f`，PR #5：完整 S2 |
+| S3 交付分支 | `feature/s3-02-item-snapshot`，由 `feature/s3-01-item-write-api` 的 `df2510d` 接續 |
+| S3 開發基準 | `main` 的 `9eace5f`，PR #5：完整 S2 |
 | S3-01 功能提交 | `408593e`：文字新增／刪除 API 與 Participant 寫入配額 |
 | S3-01 P3 修正 | `df2510d`：補強連線池設定重設驗證 |
-| 遠端狀態 | S3 尚未推送、開 PR 或合併 |
+| S3 交付 | [PR #6](https://github.com/ARueiz/Pasto/pull/6) 包含 S3-01 與 S3-02，目標分支為 `main`，合併狀態以 PR 為準 |
 | 當前交付點 | S3-02 獨立 review 已完成，無阻擋問題，P3 已補文件。審查範圍 `df2510d..a05d87f` |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
@@ -53,7 +53,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S3-02 已完成獨立審查。下一個工作項為 S4 基本前端 UI。S3-01 的非阻擋 P3 修正保留於 `df2510d`，S3-02 的最壞回應估算及審查證據見 [測試紀錄](docs/testing.md)。
+S3 由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 交付。合併後，下一個工作項為從 `main` 接續 S4 基本前端 UI。S3-01 的非阻擋 P3 修正保留於 `df2510d`，S3-02 的最壞回應估算及審查證據見 [測試紀錄](docs/testing.md)。
 
 ## 後續必須保留的事項
 
