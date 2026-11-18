@@ -101,8 +101,14 @@ export function ConfirmDialog({ title, description, action, onCancel, onConfirm 
 }
 
 export function CopyFallback({ value, close }: { value: string; close: () => void }) {
+  const field = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, [value]);
+
   return <StatusNotice title="無法自動複製" alert action={<Button onClick={close}>關閉</Button>}>
-    文字已幫你選取，請按 Ctrl＋C 或長按複製。<textarea aria-label="手動複製文字" readOnly value={value}
-      ref={element => { element?.focus(); element?.select(); }} />
+    文字已幫你選取，請按 Ctrl＋C 或長按複製。<textarea ref={field} aria-label="手動複製文字" readOnly value={value} />
   </StatusNotice>;
 }

@@ -271,6 +271,30 @@ test('missing Clipboard API falls back to selected invite text', async ({ page }
   await expect(page.locator('.copy-toast[role="status"]')).toBeEmpty();
 });
 
+test('manual copy stays open without stealing focus while composing or searching', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined });
+  });
+  await mockApi(page);
+  await page.goto('/r/ABC123');
+  await page.getByRole('button', { name: '複製', exact: true }).click();
+  const fallback = page.getByRole('textbox', { name: '手動複製文字' });
+  await expect(fallback).toBeFocused();
+  expect(await fallback.evaluate(element => (element as HTMLTextAreaElement).selectionEnd)).toBe(original.length);
+
+  const composer = page.getByRole('textbox', { name: '要送出的文字' });
+  await composer.pressSequentially('Pasto clipboard');
+  await expect(composer).toHaveValue('Pasto clipboard');
+  await expect(composer).toBeFocused();
+
+  await page.getByRole('button', { name: '搜尋', exact: true }).click();
+  const search = page.getByRole('searchbox');
+  await search.pressSequentially('example');
+  await expect(search).toHaveValue('example');
+  await expect(search).toBeFocused();
+  await expect(fallback).toBeVisible();
+});
+
 test('denied sessionStorage and throttled reads show the matching notices', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'sessionStorage', { get: () => { throw new DOMException('denied', 'SecurityError'); } });
