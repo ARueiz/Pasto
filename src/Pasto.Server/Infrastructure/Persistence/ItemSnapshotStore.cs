@@ -15,7 +15,8 @@ public sealed class ItemSnapshotStore(IDbContextFactory<PastoDbContext> factory)
         var items = await context.Items.Where(item => item.RoomId == roomId)
             .OrderByDescending(item => item.CreatedVersion).ThenByDescending(item => item.Id)
             .Select(item => new SnapshotItem(item.Id, item.Content, item.CreatedAt, item.CreatedVersion,
-                item.OwnerParticipantId == participantId))
+                item.OwnerParticipantId, item.OwnerParticipantId == participantId,
+                item.OwnerParticipantId == room.CreatorParticipantId))
             .ToListAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ItemSnapshot(items, room.ItemCount, room.Version, room.ExpiresAt);

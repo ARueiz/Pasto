@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +19,82 @@ namespace Pasto.IntegrationTests;
 
 public sealed class ItemSnapshotApiTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task AuthorCode_UsesCanonicalUuidByteOrder()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var roomId = Guid.Parse("00112233-4455-4677-8899-aabbccddeeff");
+        var participantId = Guid.Parse("fedcba98-7654-4c32-90ab-cdef10203040");
+        var credential = new RoomSecrets().GenerateCredential();
+        var now = DateTime.UtcNow;
+        var expires = now.AddHours(1);
+        await using (var setup = database.CreateContext())
+        {
+            await using var transaction = await setup.Database.BeginTransactionAsync();
+            await setup.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO room_code_reservations (code, reusable_after) VALUES ('FIX001', {expires.AddHours(24)});
+                INSERT INTO rooms (id, code, creator_participant_id, created_at, expires_at)
+                VALUES ({roomId}, 'FIX001', {participantId}, {now}, {expires});
+                INSERT INTO room_participants (id, room_id, credential_hash, created_at)
+                VALUES ({participantId}, {roomId}, {credential.Hash}, {now});
+                """);
+            await transaction.CommitAsync();
+        }
+        await using var factory = new PastoApiFactory(database.ConnectionString);
+        using var client = factory.CreateClient();
+        using var response = await ReadAsync(client, roomId, credential.Value, "/me");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var participant = await response.Content.ReadFromJsonAsync<JsonElement>();
+        // 此向量用 Node.js SHA-256 對去除連字號後的 32 個十六進位位元組獨立計算。
+        Assert.Equal("0653C", participant.GetProperty("authorCode").GetString());
+    }
+
+    [Fact]
+    public async Task AuthorCode_MatchesIdentityAndSnapshotsForOwnerAndMember()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        await using var factory = new PastoApiFactory(database.ConnectionString);
+        using var client = factory.CreateClient();
+        using var create = await client.PostAsync("/api/rooms", null);
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var owner = await create.Content.ReadFromJsonAsync<JsonElement>();
+        var roomId = owner.GetProperty("roomId").GetGuid();
+        using var join = await client.PostAsJsonAsync("/api/rooms/join", new { code = owner.GetProperty("code").GetString() });
+        Assert.Equal(HttpStatusCode.Created, join.StatusCode);
+        var member = await join.Content.ReadFromJsonAsync<JsonElement>();
+        var participants = new[] { (Identity: owner, IsCreator: true), (Identity: member, IsCreator: false) };
+        var authors = new Dictionary<Guid, (string? Code, bool IsCreator)>();
+        var add = CreateAdd(database);
+        foreach (var (identity, isCreator) in participants)
+        {
+            var code = identity.GetProperty("authorCode").GetString();
+            Assert.Matches("^[0-9A-F]{5}$", code!);
+            using var response = await ReadAsync(client, roomId, identity.GetProperty("credential").GetString(), "/me");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var recovered = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(code, recovered.GetProperty("authorCode").GetString());
+            Assert.Equal(isCreator, recovered.GetProperty("isCreator").GetBoolean());
+            var added = await add.ExecuteAsync(roomId, identity.GetProperty("participantId").GetGuid(), "author test");
+            authors.Add(added.ItemId, (code, isCreator));
+        }
+        foreach (var (identity, _) in participants)
+        {
+            using var response = await ReadAsync(client, roomId, identity.GetProperty("credential").GetString());
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var snapshot = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var items = snapshot.GetProperty("items");
+            Assert.Equal(authors.Count, items.GetArrayLength());
+            foreach (var item in items.EnumerateArray())
+            {
+                var expected = authors[item.GetProperty("id").GetGuid()];
+                Assert.Equal(expected.Code, item.GetProperty("authorCode").GetString());
+                Assert.Equal(expected.IsCreator, item.GetProperty("authorIsCreator").GetBoolean());
+                Assert.False(item.TryGetProperty("ownerParticipantId", out _));
+                Assert.False(item.TryGetProperty("authorColor", out _));
+            }
+        }
+    }
+
     [Fact]
     public async Task EmptyRoom_ReturnsAnEmptySnapshot()
     {

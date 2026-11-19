@@ -129,19 +129,15 @@ function RoomGate({ code, handoff, home, theme, onTheme }: Appearance & {
     const controller = new AbortController();
     const { signal } = controller;
     const remembered = attempt.fresh ? {} : loadSession(code);
-    let known = remembered.session;
+    const known = remembered.session;
     const finish = (next: Gate) => { if (!signal.aborted) setGate(next); };
     async function enter() {
       if (remembered.invalid) { finish({ kind: remembered.invalid }); return; }
       try {
-        if (known) {
-          const identity = await api.me(known, signal);
-          if (signal.aborted) return;
-          known = { ...known, ...identity };
-        } else {
-          known = await api.join(code, signal);
-        }
-        if (!signal.aborted) finish({ kind: 'ready', session: known, saved: saveSession(known) });
+        const session = known
+          ? { ...known, ...await api.me(known, signal) }
+          : await api.join(code, signal);
+        if (!signal.aborted) finish({ kind: 'ready', session, saved: saveSession(session) });
       } catch (error) {
         if (signal.aborted) return;
         if (error instanceof ApiError && (error.status === 401 && known || error.status === 404)) {

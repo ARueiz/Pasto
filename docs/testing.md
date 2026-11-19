@@ -1,5 +1,48 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S5 合併前修整驗證（2026-11-20）
+
+- 修正前先跑兩個新案例。跨午夜案例在日期分隔後第一則訊息的可見作者標籤斷言出現 `element(s) not found`，重現缺失。平滑捲動中斷案例通過。
+- 以日期分隔線作為分組邊界後，`npm run lint`、`npm run build` 和 `npm run test:ui -- --workers=1` 均通過，Edge 共 28 例、0 失敗。新增案例驗證台北時間跨午夜首則訊息顯示作者，以及動畫途中按 Home 後在下一次快照更新時維持閱讀位置並增加未讀數。
+- 2026-11-20 的合併前驗證回報如下。Claude 在修整後重跑前端檢查，本輪兩個新增案例均通過。
+
+| 驗證 | 來源 | 結果 |
+| --- | --- | --- |
+| .NET Release Build、`dotnet format --verify-no-changes` | Claude，11/20 | 通過，零警告、零錯誤 |
+| PostgreSQL 整合測試 | 11/20 驗證回報 | 284／284 通過 |
+| `npm run lint`、`npm run build`（含 `tsc --noEmit`） | Claude，11/20 修整後 | 均通過，Lint 零警告 |
+| Edge E2E | Claude，11/20 修整後 | 28 通過、0 失敗，29.6 秒。第 7 例跨午夜作者標籤及第 18 例鍵盤中斷平滑捲動均通過 |
+
+- 11/20 的整合測試數字取自合併前驗證回報。另保留本機可核對的 `tests/Pasto.IntegrationTests/TestResults/s5-round3.trx`，其執行時間為 11/19 20:50（Asia/Taipei），284 通過、0 失敗、0 略過。
+- 雙 Edge 搭配真後端的實測為 Codex 的紀錄，Claude 尚未獨立重跑。審查結論為無阻擋合併的問題。
+
+## S5 第三輪審查與作者代碼驗證（2026-11-19）
+
+- Release Build 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 通過。完整 PostgreSQL 整合測試 284 passed／0 failed／0 skipped，TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s5-round3.trx`。
+- 後端用固定 UUID 組合經真 PostgreSQL 的 `/me` 驗證預先獨立算出的 SHA-256 向量 `0653C`。建房／加入、`/me` 與兩個身分讀取的快照驗證相同代碼，且快照的房主旗標與公開欄位符合契約。
+- `npm run lint`、`npm run build` 與 Edge E2E 26 例通過。涵蓋 A／B／C 視角、360px header、兩種主題、搜尋結果分組、隱藏標籤後的可及名稱、舊 session 恢復，以及兩項 P3。首次 TypeScript Build 發生 `TS2352`，修正測試注入函式的視窗屬性型別宣告後重跑通過。
+- 兩個獨立的 360px Edge 工作階段經 Vite、Kestrel、SignalR WebSocket 與隔離 PostgreSQL schema 實測房主及訪客。雙方各送一則文字，確認房主與訪客的標籤、訪客自己的代碼等於房主畫面上的訪客代碼、配色一致，以及訪客重整後可恢復原代碼。
+
+## S5 房間介面驗證（2026-11-19）
+
+- 完整 PostgreSQL 整合測試 282 例與 Edge 20 例通過。快照測試驗證 `authorColor` 為 0～5，同一作者的訊息跨身分讀取時顏色索引一致。Edge 新增案例驗證淺色與深色主題中的訪客標籤配色、訊息正文顏色，以及智慧捲動、重連保留閱讀位置和跳到最新後清除計數。
+- Release Build、格式檢查、前端 Lint 與 Build 通過。Edge 從正式建置預覽取得兩個有版本的 Pasto favicon 資產，回應與原始檔一致，SVG 可解碼。
+
+## S5 審查修正驗證（2026-11-19）
+
+- `npm run lint` 與 `npm run build` 通過，Build 包含 TypeScript 檢查。完整 Edge 18 例通過，包括原有 14 例及四項回歸測試。
+- 新增案例驗證 Hub 協商回 403 時仍能載入、重新整理、輪詢與送出；慢快照期間可送出；快照連續三次失敗後仍可新增與刪除；通知觸發的快照早於 POST 回應顯示時，送出者會捲到底，後續其他人的變更維持捲動位置。
+- 兩個獨立的 Edge 工作階段都攔截 Hub 協商並回 403。透過 Vite、Kestrel 與隔離的 PostgreSQL schema 實測首次載入、手動更新、跨工作階段補查、新增、刪除與關房，全部通過。
+- 本輪修正範圍為前端，既有後端 282 例未重跑。
+
+## S5 SignalR 與整份快照同步驗證（2026-11-19）
+
+- Release Build 0 warning／0 error，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 通過。完整 Release 測試 282 passed／0 failed／0 skipped，TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s5-release.trx`。
+- `RoomHubTests` 使用真 PostgreSQL 與 SignalR，驗證同房授權、跨房隔離、提示只含房間 UUID 與十進位版本字串、關房後拒絕重訂閱。分別在 commit 前後注入中斷，兩者都未發送提示，只有後者留下資料。提交成功後注入通知故障，仍回傳成功，資料可由快照讀取。
+- 前端 `npm run lint`、`npm run build` 通過，後者包含 TypeScript 檢查。Edge 14 例通過，涵蓋先訂閱再讀、重複與亂序通知合併、慢快照期間維持單一請求、舊 401／404 不清除重新加入的房間，以及重連與前景補查。
+- 兩個獨立的 Edge 工作階段經 Vite、Kestrel WebSocket 與隔離 PostgreSQL schema 實測新增、刪除、重新訂閱和關房。測試工具刻意丟棄訪客端最後一次 `RoomChanged`，正常前景頁面兩次分別在 17.15 秒與 18.68 秒補回資料。壓測與正式反向代理驗證留在 S7／S8。
+- 初次 API 測試出現 `No password has been provided`，修正測試程序的連線設定後通過。初次雙瀏覽器實測只關閉代理的上游 socket，等待訪客顯示斷線狀態逾時，改由測試工具關閉瀏覽器端 socket 後通過。
+
 ## S3-02 文字快照驗證（2026-11-18）
 
 - 完整 Release 回歸 278 passed／0 failed／0 skipped（`s3-02-full.trx`）。

@@ -24,6 +24,7 @@ internal sealed class CreatedRoomResponse(CreatedRoom room)
     public DateTime ExpiresAt { get; } = room.ExpiresAt;
     public string Version { get; } = room.Version.ToString(CultureInfo.InvariantCulture);
     public Guid ParticipantId { get; } = room.ParticipantId;
+    public string AuthorCode { get; } = ParticipantAuthorCode.From(room.RoomId, room.ParticipantId);
     public string Credential { get; } = room.Credential;
     public bool IsCreator { get; } = true;
 }

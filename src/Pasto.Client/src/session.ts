@@ -1,12 +1,13 @@
 import type { RoomSession } from './api';
 
 type Invalid = 'identity' | 'room';
+type StoredRoomSession = Omit<RoomSession, 'authorCode'> & { authorCode?: string };
 const prefix = 'pasto:room:';
 const codeKey = (code: string) => `${prefix}code:${code}`;
 const credentialKey = (id: string) => `${prefix}credential:${id}`;
 const isUuid = (value: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
 
-export function loadSession(code: string): { session?: RoomSession; invalid?: Invalid } {
+export function loadSession(code: string): { session?: StoredRoomSession; invalid?: Invalid } {
   try {
     const id = sessionStorage.getItem(codeKey(code));
     if (!id) return {};
@@ -14,8 +15,8 @@ export function loadSession(code: string): { session?: RoomSession; invalid?: In
     if (!isUuid(id)) return { invalid: 'identity' };
     const stored = sessionStorage.getItem(credentialKey(id));
     if (!stored) return { invalid: 'identity' };
-    let session: RoomSession;
-    try { session = JSON.parse(stored) as RoomSession; }
+    let session: StoredRoomSession;
+    try { session = JSON.parse(stored) as StoredRoomSession; }
     catch { return { invalid: 'identity' }; }
     return session && session.roomId === id && session.code === code && typeof session.credential === 'string' && session.credential
       ? { session } : { invalid: 'identity' };

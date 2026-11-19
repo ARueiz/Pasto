@@ -44,7 +44,11 @@ Code 有約 31 bits 搜尋空間，猜中即可 Join 並讀內容；Credential �
 
 REST／Hub 以 Participant Credential 找到 ParticipantId／RoomId，逐次比對路徑／參數與有效房間；Owner／Creator 從後端決定，不信任 body。房主與其他人都只能刪自己的文字，房主可關整房。
 
-sessionStorage 以 Room.Id 存每房 Credential，另存 Code→Room.Id 的分頁內對應。F5 先呼叫 /me 恢復，不重新 Join。失效時停連線、清該房狀態，不拿同 Code 靜默加入可能重配的新 UUID。主動離開只清本分頁，不撤銷其他副本。遺失 Credential 無法恢復舊文字刪除權／房主權。
+sessionStorage 以 Room.Id 存每房 Credential，另存 Code→Room.Id 的分頁內對應。F5 先呼叫 /me 恢復，不重新 Join。舊身分缺少作者代碼時也由 /me 補齊。失效時停連線、清該房狀態，不拿同 Code 靜默加入可能重配的新 UUID。主動離開只清本分頁，不撤銷其他副本。遺失 Credential 無法恢復舊文字刪除權／房主權。
+
+API 層以房間 UUID 的 16 bytes 接上 Participant UUID 的 16 bytes，兩者都採標準 UUID 大端位元組序。將這 32 bytes 做 SHA-256，取前 5 碼大寫十六進位作為 `authorCode`。四個 REST 回傳點共用同一算法，同一房間與 Participant 組合會得到相同代碼。直接取 UUID 前綴會在未來改用 UUID v7 時遇到共同的時間戳前綴，雜湊讓顯示代碼與內部 ID 脫鉤。快照只提供作者代碼和房主旗標，作者代碼不具授權用途。
+
+五碼提供 1,048,576 種組合，以均勻分布估算，房間五人至少一組撞碼的機率約十萬分之一。本階段接受撞碼，兩個他人代碼相同、訊息在目前顯示清單中相鄰且相隔至多五分鐘時，可能被視為同一作者分組。
 
 不使用 localStorage，不依賴 beforeunload 刪 Participant。分頁複製、opener、Session Restore、XSS 可能複製／讀取 sessionStorage，不能保證關頁即銷毀；手機掃碼不繼承原電腦身分。[sessionStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage)
 
@@ -98,11 +102,11 @@ Version 對實際新增、實際刪除及關房加一；加入／身分恢復不
 
 | API | 驗證與成功結果 |
 | --- | --- |
-| POST /api/rooms | 公開建房限流與 admission；201 回 roomId、code、joinUrl、expiresAt、version、participantId、credential、isCreator=true |
-| POST /api/rooms/join，body: code | 公開猜碼／失敗／每房 Participant 保護；201 回新 Participant Credential 及房間資訊，isCreator=false |
-| GET /api/rooms/{roomId}/me | Bearer＋同房有效性；回自己的 Participant 與房主狀態，不建立新身分 |
+| POST /api/rooms | 公開建房限流與 admission；201 回 roomId、code、joinUrl、expiresAt、version、participantId、credential、isCreator=true、authorCode |
+| POST /api/rooms/join，body: code | 公開猜碼／失敗／每房 Participant 保護；201 回新 Participant Credential、authorCode 與房間資訊，isCreator=false |
+| GET /api/rooms/{roomId}/me | Bearer＋同房有效性；回自己的 roomId、participantId、isCreator、authorCode，不建立新身分 |
 | GET /api/rooms/{roomId} | Bearer＋同房有效性；回 version、itemCount、totalBytes（統計）、expiresAt、serverTime、限制；不含文字 |
-| GET /api/rooms/{roomId}/items | Bearer＋同房有效性；一次回全部有效 items、snapshotVersion、itemCount、expiresAt（MVP 無 limit／cursor，ADR 0003）；每筆可回 isOwn／canDelete 供 UI，但後端仍授權 |
+| GET /api/rooms/{roomId}/items | Bearer＋同房有效性；一次回全部有效 items、snapshotVersion、itemCount、expiresAt（MVP 無 limit／cursor，ADR 0003）。每筆回傳 isOwn、canDelete、authorCode、authorIsCreator，授權由後端判定 |
 | POST /api/rooms/{roomId}/items，body: content | Bearer；鎖內驗證 8 KiB／300 筆；Owner 取自驗證器；201 回 item 與 committedVersion，作同步提示，不直接拼入快照 |
 | DELETE /api/rooms/{roomId}/items/{itemId} | Bearer＋Owner；200 回 changed、committedVersion；同房不存在 changed=false、不扣計數／加版本；非本人 403，房主亦同 |
 | DELETE /api/rooms/{roomId} | Bearer＋Creator；設定 DeletedAt／Version，commit 後 204，Client 終止本房；其他人 403，已失效 404 |
@@ -142,11 +146,13 @@ Hub 使用同一 Participant 驗證器，SubscribeRoom(roomId) 驗證同房／�
 
 通知統一為 `RoomChanged { roomId, version }`，只代表已提交的房間狀態變動，沒有正文、itemId、previousVersion 或可回放的事件序號。關房也可發此提示，Client 接著 REST 得到 RoomUnavailable。重複／亂序只需保留最高 observedVersion 與一個 dirty 標記，不逐筆套用、不等版本連續、不保存事件佇列。
 
+S5 使用同源 `/hubs/room`。提示版本沿用 REST 的十進位字串，Client 以 BigInt 比較。提交後的通知有獨立的 2 秒期限，逾時或失敗時由 Client 補查 REST。Vite 本機代理在轉送瀏覽器傳輸前，將網址中的憑證移到 Bearer 標頭，以減少代理日誌記錄憑證的機會。
+
 Client 只需少量狀態：目前 Room.Id／generation、已顯示 snapshotVersion、最高 observedVersion、dirty、單一進行中工作、同步 UI 狀態。沒有事件缺號緩衝或完整局部新增／刪除狀態機。
 
 ### 訂閱、通知合併與舊回應保護
 
-1. 註冊 handler → 建立 SignalR → SubscribeRoom 成功 → REST 取整份快照。載入期間新提示更新 observedVersion／dirty，不排事件清單。
+1. Hub 可用時，註冊 handler → 建立 SignalR → SubscribeRoom 成功 → REST 取整份快照。載入期間新提示更新 observedVersion／dirty，不排事件清單。
 2. 收到同房 version 大於本機時，合併通知安排同步。候選 debounce 150 ms、最長等待 500 ms，重複提示不各發 GET；已有進行中的工作只設 dirty，不開第二個同步流程。
 3. 提示只作是否需同步的依據。不能直接把通知的 version 當已套用版本，也不能只因最大提示版本已讀過就忽略到期／授權狀態檢查。
 4. 每個同步 round 以一次 GET 取得整份快照，成功後整體替換。滿房時每次都重抓全部，此取捨會增加讀取，靠合併與壓測觀察，之後才評估分頁或局部更新（ADR 0003）。
@@ -169,9 +175,11 @@ Client 只需少量狀態：目前 Room.Id／generation、已顯示 snapshotVers
 
 前景每次隨機間隔 15～20 秒 GET 房間 metadata；版本相同不取正文，不同則合併安排 round。1,000 個前景頁光探測約 50～67 次／秒，另有快照、寫入、重連，皆納入壓測。回前景／網路恢復立即檢查。主要修復目標 20～30 秒、最長約 60 秒可接受；timer 不等於完成延遲保證。
 
+Hub 無法使用時，Client 仍以 REST 載入及手動更新快照，並以同一個前景輪詢補查版本。寫入不受同步狀態限制，由伺服器驗證房間與身分，本機只在這次寫入處理中防止重複操作。
+
 明確啟用自動重連，initial start 失敗另處理；指數退避＋jitter／最大間隔。每次重連用原 Credential 驗證、SubscribeRoom、重新讀所需範圍；不能假設 group 或事件會自動恢復。[SignalR groups](https://learn.microsoft.com/en-us/aspnet/core/signalr/groups?view=aspnetcore-10.0)
 
-401／RoomUnavailable 是該身分／UUID 的終止狀態：增加 generation、清文字／該房 Credential、停工作與連線，不自動 Join 同 Code。到期倒數可用 expiresAt／serverTime 校準，但 DB 判定才是權威。同步中／斷線停用寫入，已顯示文字仍可複製；背景節流／離線不保證修復時限。
+401／RoomUnavailable 是該身分／UUID 的終止狀態：增加 generation、清文字／該房 Credential、停工作與連線，不自動 Join 同 Code。到期倒數可用 expiresAt／serverTime 校準，但 DB 判定才是權威。已顯示文字仍可複製，背景節流／離線不保證修復時限。
 
 host 維持有界 connectionId／RoomId／Participant／到期追蹤。關房 commit 後盡力提示並清 group／中止連線，到期亦清線；group 並非授權。清線通知可能延遲，所有 REST 與 Hub invocation 仍重驗，沒有正文推播。DB commit 後程序中斷仍可能漏通知，靠上述 REST 校正；無持久回放、Outbox、Message Queue 或 exactly-once。
 

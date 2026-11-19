@@ -2,6 +2,7 @@ export interface Identity {
   roomId: string;
   participantId: string;
   isCreator: boolean;
+  authorCode: string;
 }
 
 export interface RoomSession extends Identity {
@@ -16,6 +17,8 @@ export interface Item {
   createdVersion: string;
   isOwn: boolean;
   canDelete: boolean;
+  authorCode: string;
+  authorIsCreator: boolean;
 }
 
 export interface Snapshot {
@@ -23,6 +26,14 @@ export interface Snapshot {
   itemCount: number;
   snapshotVersion: string;
   expiresAt: string;
+}
+
+interface RoomMetadata {
+  version: string;
+}
+
+interface CommittedChange {
+  committedVersion: string;
 }
 
 export class ApiError extends Error {
@@ -35,7 +46,8 @@ async function request<T>(path: string, signal: AbortSignal, method = 'GET', cre
   const headers = new Headers({ Accept: 'application/json' });
   if (credential) headers.set('Authorization', `Bearer ${credential}`);
   if (body) headers.set('Content-Type', 'application/json');
-  const response = await fetch(path, { method, headers, signal, body: body && JSON.stringify(body) });
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
+  const response = await fetch(path, { method, headers, signal: deadline, body: body && JSON.stringify(body) });
   if (!response.ok) {
     const problem: { code?: string } | null = await response.json().catch(() => null);
     const retry = response.headers.get('Retry-After');
@@ -45,16 +57,23 @@ async function request<T>(path: string, signal: AbortSignal, method = 'GET', cre
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
-const roomPath = (session: RoomSession) => `/api/rooms/${encodeURIComponent(session.roomId)}`;
+const roomPath = (session: Pick<RoomSession, 'roomId'>) => `/api/rooms/${encodeURIComponent(session.roomId)}`;
 
 export const api = {
   create: (signal: AbortSignal) => request<RoomSession>('/api/rooms', signal, 'POST'),
   join: (code: string, signal: AbortSignal) => request<RoomSession>('/api/rooms/join', signal, 'POST', undefined, { code }),
-  me: (session: RoomSession, signal: AbortSignal) => request<Identity>(`${roomPath(session)}/me`, signal, 'GET', session.credential),
+  me: (session: Pick<RoomSession, 'roomId' | 'credential'>, signal: AbortSignal) =>
+    request<Identity>(`${roomPath(session)}/me`, signal, 'GET', session.credential),
+  metadata: (session: RoomSession, signal: AbortSignal) => request<RoomMetadata>(roomPath(session), signal, 'GET', session.credential),
   snapshot: (session: RoomSession, signal: AbortSignal) => request<Snapshot>(`${roomPath(session)}/items`, signal, 'GET', session.credential),
   add: (session: RoomSession, content: string, signal: AbortSignal) =>
-    request<unknown>(`${roomPath(session)}/items`, signal, 'POST', session.credential, { content }),
+    request<CommittedChange>(`${roomPath(session)}/items`, signal, 'POST', session.credential, { content }),
   delete: (session: RoomSession, id: string, signal: AbortSignal) =>
-    request<unknown>(`${roomPath(session)}/items/${encodeURIComponent(id)}`, signal, 'DELETE', session.credential),
+    request<CommittedChange>(`${roomPath(session)}/items/${encodeURIComponent(id)}`, signal, 'DELETE', session.credential),
   close: (session: RoomSession, signal: AbortSignal) => request<void>(roomPath(session), signal, 'DELETE', session.credential),
 };
+
+export function invalidRoom(error: unknown) {
+  if (error instanceof ApiError && error.status === 401) return 'identity';
+  if (error instanceof ApiError && error.status === 404) return 'room';
+}
