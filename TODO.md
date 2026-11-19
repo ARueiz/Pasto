@@ -14,6 +14,8 @@
 | S3-02 審查 | 獨立 review 已完成，無阻擋問題，P3 已補文件。審查範圍 `df2510d..a05d87f` |
 | S4 交付 | `feature/s4-clipboard-ui` 已由使用者透過 [PR #7](https://github.com/ARueiz/Pasto/pull/7) 合併至 `main@00c2183`。完整獨立 review 已完成，P2 已修正並通過回歸 |
 | S5 實作分支 | `feature/s5-signalr-sync`，由包含 S4 合併點的 `main@efbcb73` 建立 |
+| S5 合併 | [PR #8](https://github.com/ARueiz/Pasto/pull/8) 已於 2026-11-20 合併至 `main@98424e6`（Asia/Taipei） |
+| S6 工作分支 | `feature/s6-room-cleanup`，由包含 S5 合併與交付紀錄的本機 `main` 建立 |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -38,8 +40,8 @@
 - [x] S5 房間介面：智慧捲動、「跳到最新」、訪客名稱配色，以及 Pasto 分頁圖示網址更新。
 - [x] S5 第三輪：修正平滑捲動途中快照更新及首連狀態兩項 P3，加入五碼作者識別與連續訊息分組。
 - [x] S5 獨立審查，審查方回報無阻擋問題。跨午夜標籤 P3 已修正，平滑捲動中斷已補 Edge 測試。 [審查交接與結果](docs/s5-review.md)
-- [ ] S5 合併。
-- [ ] S5 合併至 `main` 後，依 AGENTS.md §10 更新 README 的目前狀態、進度表及合併 PR，並與 TODO 同步。
+- [x] S5 合併。[PR #8](https://github.com/ARueiz/Pasto/pull/8) 已合併至 `main@98424e6`。
+- [x] 依 AGENTS.md §10 更新 README 與 TODO，記錄合併 PR、S5 交付及 S6。
 - [ ] S6：到期／關房資料清理。
 - [ ] S7：防護、資源與濫用處理。
 - [ ] S8：壓測與收尾。
@@ -83,7 +85,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-2026-11-20 已收到 [S5 獨立審查](docs/s5-review.md) 的無阻擋結論並處理兩個非阻擋項目。審查交接文件納入 S5 提交範圍。合併後同步 README 與 TODO，再接續 S6 的到期資料清理。
+2026-11-20，S5 已透過 [PR #8](https://github.com/ARueiz/Pasto/pull/8) 合併至 `main`，README 與 TODO 已同步更新。下一步在 `feature/s6-room-cleanup` 實作 S6 第一個工作項目，分批清理到期與關房的主資料。房碼保留紀錄回收與連線清理在下一個工作項目處理。 [S6 實作計畫](docs/sprint-1-implementation-plan.md)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 

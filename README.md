@@ -6,7 +6,7 @@
 
 ## 目前狀態
 
-**S1～S4 已合併至 `main`。** 目前可在瀏覽器建房、分享與操作文字。跨裝置更新需手動重新整理，下一階段是 S5 的 SignalR 通知與自動同步。
+**S1～S5 已合併至 `main`。** 房間的文字新增與刪除可以跨裝置即時同步。重連或 Hub 暫時無法使用時，前端會透過 REST 補讀。下一階段為 S6 的到期與關房清理及房碼冷卻回收。
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -19,7 +19,8 @@
 | S2 房間／匿名身分 API | 已由 PR #5 合併（9eace5f）；228 例通過，使用者確認測試審查 OK |
 | S3 文字操作、配額與快照 | 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併（`dbfcb24`）。獨立審查的兩輪完整測試各 278 例通過。見 [S3 工作項](docs/s3-items.md) |
 | S4 基本前端 | 已由 [PR #7](https://github.com/ARueiz/Pasto/pull/7) 合併（`00c2183`）。包含入口頁、房間頁、身分恢復、分享、文字操作、搜尋與手動刷新。Edge 10 例通過。見 [UI 規格](docs/ui-spec.md) 與 [本機啟動與 API](docs/s4-api.md) |
-| S5 SignalR 通知與同步 | 下一階段，尚未開始 |
+| S5 SignalR 通知與同步 | 已由 [PR #8](https://github.com/ARueiz/Pasto/pull/8) 合併（`98424e6`）。包含同房訂閱、提交後通知、REST 快照與斷線備援，以及作者代碼、訊息分組與智慧捲動。PostgreSQL 284 例與 Edge 28 例通過。見 [S5 審查紀錄](docs/s5-review.md) |
+| S6 到期／關房清理與房碼回收 | 下一階段。先處理到期與關房資料的分批清理，再接房碼保留紀錄回收與連線清理 |
 
 目前交付點與下一步見 [TODO.md](TODO.md)，整體規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
