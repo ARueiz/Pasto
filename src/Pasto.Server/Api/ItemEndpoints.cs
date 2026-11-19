@@ -26,7 +26,9 @@ internal static class ItemEndpoints
                     item.CreatedAt,
                     createdVersion = item.CreatedVersion.ToString(CultureInfo.InvariantCulture),
                     item.IsOwn,
-                    canDelete = item.IsOwn
+                    canDelete = item.IsOwn,
+                    authorCode = ParticipantAuthorCode.From(roomId, item.OwnerParticipantId),
+                    item.AuthorIsCreator
                 }),
                 snapshot.ItemCount,
                 snapshotVersion = snapshot.Version.ToString(CultureInfo.InvariantCulture),
@@ -35,10 +37,11 @@ internal static class ItemEndpoints
         }).WithName(SnapshotName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
 
         app.MapPost("/api/rooms/{roomId:guid}/items", async (Guid roomId, AddItemRequest request,
-            HttpContext context, AddItem add, CancellationToken cancellationToken) =>
+            HttpContext context, AddItem add, RoomChangeNotifications notifications, CancellationToken cancellationToken) =>
         {
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
             var result = await add.ExecuteAsync(roomId, identity.ParticipantId, request.Content!, cancellationToken);
+            await notifications.PublishAsync(roomId, result.CommittedVersion);
             return Results.Json(new
             {
                 item = new
@@ -55,10 +58,11 @@ internal static class ItemEndpoints
         }).WithName(AddName).RequireAuthorization().AddEndpointFilter<ParticipantWriteFilter>();
 
         app.MapDelete("/api/rooms/{roomId:guid}/items/{itemId:guid}", async (Guid roomId, Guid itemId,
-            HttpContext context, DeleteOwnItem delete, CancellationToken cancellationToken) =>
+            HttpContext context, DeleteOwnItem delete, RoomChangeNotifications notifications, CancellationToken cancellationToken) =>
         {
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
             var result = await delete.ExecuteAsync(roomId, identity.ParticipantId, itemId, cancellationToken);
+            if (result.Changed) await notifications.PublishAsync(roomId, result.CommittedVersion);
             return Results.Ok(new { result.Changed, committedVersion = result.CommittedVersion.ToString(CultureInfo.InvariantCulture) });
         }).WithName(DeleteName).RequireAuthorization().AddEndpointFilter<ParticipantWriteFilter>();
     }

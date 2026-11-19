@@ -32,6 +32,14 @@
   --accent-soft: #E0F2F0; /* 主色淡底：徽章、圖示底、次要按鈕 */
   --accent-fg: #FFFFFF;   /* 放在 --accent-strong 上的文字 */
 
+  /* 訪客名稱的淺色／深色組合 */
+  --guest-color-0: light-dark(#0F766E, #5EEAD4);
+  --guest-color-1: light-dark(#1D4ED8, #93C5FD);
+  --guest-color-2: light-dark(#7E22CE, #D8B4FE);
+  --guest-color-3: light-dark(#9F1239, #FDA4AF);
+  --guest-color-4: light-dark(#92400E, #FCD34D);
+  --guest-color-5: light-dark(#166534, #86EFAC);
+
   /* ---- 色彩：狀態 ---- */
   --danger: #C62828;
   --danger-soft: #FCEBEB;

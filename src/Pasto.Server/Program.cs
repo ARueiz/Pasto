@@ -9,6 +9,8 @@ using Pasto.Server.Infrastructure.Persistence;
 using Pasto.Server.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+// 瀏覽器 SignalR 傳輸會在 query string 放憑證，停用會記錄該字串的框架請求日誌。
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 // 在 JSON 綁定／字串配置前由 Kestrel 限制實際 body bytes，包含未知長度的串流。
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 32 * 1024);
 
@@ -66,6 +68,8 @@ builder.Services.AddAuthentication(ParticipantAuthenticationHandler.SchemeName)
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ParticipantAuthenticationHandler>(
         ParticipantAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddAuthorization();
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<RoomChangeNotifications>();
 builder.Services.AddOptions<CreateRoomOptions>()
     .Bind(builder.Configuration.GetSection("RoomCreation"))
     .Validate(options => options.MaxCodeAttempts is >= 1 and <= 20, "MaxCodeAttempts must be between 1 and 20.")
@@ -88,6 +92,8 @@ app.UseStatusCodePages(status => ApiProblem.WriteAsync(status.HttpContext,
     status.HttpContext.Response.StatusCode,
     status.HttpContext.Response.StatusCode == 413 ? "RequestBodyTooLarge" : "InvalidRequest"));
 app.UseForwardedHeaders();
+app.UseWebSockets();
+app.Use(RoomHub.CheckOriginAsync);
 app.UseRouting();
 app.UseRateLimiter();
 app.UseAuthentication();
@@ -96,6 +102,7 @@ app.MapRoomCreation();
 app.MapParticipants();
 app.MapRoomStateAndClosure();
 app.MapItems();
+app.MapHub<RoomHub>(RoomHub.Path).RequireAuthorization();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
 

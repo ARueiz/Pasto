@@ -19,7 +19,13 @@ internal static class ParticipantEndpoints
         {
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
             var participant = await get.ExecuteAsync(roomId, identity.ParticipantId, cancellationToken);
-            return Results.Ok(participant);
+            return Results.Ok(new
+            {
+                participant.RoomId,
+                participant.ParticipantId,
+                participant.IsCreator,
+                authorCode = ParticipantAuthorCode.From(participant.RoomId, participant.ParticipantId)
+            });
         }).WithName(MeName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
     }
 }
@@ -30,6 +36,7 @@ internal sealed class JoinedRoomResponse(JoinedRoom room)
 {
     public Guid RoomId { get; } = room.RoomId;
     public Guid ParticipantId { get; } = room.ParticipantId;
+    public string AuthorCode { get; } = ParticipantAuthorCode.From(room.RoomId, room.ParticipantId);
     public string Code { get; } = room.Code;
     public string JoinUrl { get; } = $"/r/{room.Code}";
     public DateTime ExpiresAt { get; } = room.ExpiresAt;

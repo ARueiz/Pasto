@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { ApiError, api } from './api';
-import type { Item, RoomSession, Snapshot } from './api';
+import { ApiError, api, invalidRoom } from './api';
+import type { Item, RoomSession } from './api';
+import { useRoomSync } from './useRoomSync';
+import { useRoomScroll } from './useRoomScroll';
 import { Button, ConfirmDialog, CopyFallback, ErrorNotice, Icon, Logo, StatusNotice, ThemeOptions } from './ui';
 import type { Theme } from './ui';
 
@@ -11,6 +13,9 @@ const countFormat = new Intl.NumberFormat('zh-TW');
 const timeFormat = new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
 const dateFormat = new Intl.DateTimeFormat('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
 const noItems: Item[] = [];
+const authorGroupGapMs = 5 * 60_000;
+const formatAuthor = (name: string, isCreator: boolean) => isCreator ? `${name}(房主)` : name;
+const authorColor = (code: string) => Number.parseInt(code, 16) % 6;
 
 type Confirmation = { kind: 'leave' | 'close' } | { kind: 'delete'; id: string };
 type CopyFeedback = { kind: 'success'; message: string } | { kind: 'fallback'; text: string };
@@ -18,6 +23,13 @@ const confirmationText = {
   leave: ['離開房間？', '這個分頁會清除身分與已載入的文字。房間和其他裝置不受影響。', '離開房間'],
   close: ['關閉房間？', '關閉後，所有人都無法再讀取此房間。', '關閉房間'],
   delete: ['刪除這則文字？', '刪除後，房間裡將無法再讀取這則文字。', '刪除文字'],
+};
+const syncText = {
+  connecting: '連線中',
+  syncing: '同步中',
+  current: '已同步',
+  disconnected: '連線中斷',
+  stale: '同步未完成',
 };
 
 function queryPattern(text: string): RegExp | null {
@@ -40,9 +52,13 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   session: RoomSession; saved: boolean; theme: Theme; onTheme: (theme: Theme) => void;
   onLeave: () => void; onInvalid: (kind: 'identity' | 'room') => void;
 }) {
-  const [snapshot, setSnapshot] = useState<Snapshot>();
+  const active = useRef<AbortController | null>(null);
+  const invalidate = useCallback((kind: 'identity' | 'room') => {
+    active.current?.abort();
+    onInvalid(kind);
+  }, [onInvalid]);
+  const { snapshot, status, error: syncError, refresh, stop } = useRoomSync(session, invalidate);
   const [pending, setPending] = useState(false);
-  const [needsRefresh, setNeedsRefresh] = useState(true);
   const [error, setError] = useState<{ value: unknown; uncertain: boolean }>();
   const [qr, setQr] = useState(false);
   const [search, setSearch] = useState(false);
@@ -51,12 +67,11 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   const [draft, setDraft] = useState('');
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>();
-  const [scrollRequest, setScrollRequest] = useState(0);
-  const active = useRef<AbortController | null>(null);
+  const { list, content, showJump, unreadCount, onScroll, onScrollKey, interruptJump, scrollAfterSend, jumpToLatest } =
+    useRoomScroll(snapshot, search);
   const copyRequest = useRef(0);
   const copyTimer = useRef<number | undefined>(undefined);
   const lastAnnouncement = useRef('');
-  const list = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const menuHost = useRef<HTMLDivElement>(null);
   const searchButton = useRef<HTMLButtonElement>(null);
@@ -72,44 +87,28 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
       await work(operation.signal);
     } catch (error) {
       if (operation.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 401) onInvalid('identity');
-      else if (error instanceof ApiError && error.status === 404) onInvalid('room');
-      else {
-        if (!(error instanceof ApiError) || error.status >= 500) setNeedsRefresh(true);
+      const invalid = invalidRoom(error);
+      if (invalid) {
+        stop();
+        invalidate(invalid);
+      } else {
+        if (!(error instanceof ApiError) || error.status >= 500) refresh();
         setError({ value: error, uncertain });
       }
     } finally {
       if (active.current === operation) active.current = null;
       if (!operation.signal.aborted) setPending(false);
     }
-  }, [onInvalid]);
-
-  const refresh = useCallback(async (signal: AbortSignal) => {
-    try {
-      const next = await api.snapshot(session, signal);
-      if (!signal.aborted) { setSnapshot(next); setNeedsRefresh(false); }
-    } catch (error) {
-      if (!signal.aborted) setNeedsRefresh(true);
-      throw error;
-    }
-  }, [session]);
+  }, [invalidate, refresh, stop]);
 
   useEffect(() => {
-    void run(async signal => {
-      await refresh(signal);
-      if (!signal.aborted) setScrollRequest(value => value + 1);
-    });
     return () => { active.current?.abort(); active.current = null; };
-  }, [refresh, run]);
+  }, [session]);
 
   useEffect(() => () => {
     copyRequest.current++;
     window.clearTimeout(copyTimer.current);
   }, []);
-
-  useLayoutEffect(() => {
-    if (scrollRequest && list.current) list.current.scrollTop = list.current.scrollHeight;
-  }, [scrollRequest]);
 
   useLayoutEffect(() => {
     const textarea = input.current;
@@ -148,43 +147,53 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   function closeSearch() {
     setSearch(false);
     setQuery('');
-    setScrollRequest(value => value + 1);
     searchButton.current?.focus();
   }
 
   function reload() {
     setMenu(false);
-    void run(refresh);
+    setError(undefined);
+    refresh();
   }
 
   const bytes = byteCount.encode(draft).length;
   const over = bytes > maxBytes;
-  const canSend = !pending && !needsRefresh && !!draft.trim() && !over;
+  const canWrite = !pending;
+  const canSend = canWrite && !!draft.trim() && !over;
 
   function send() {
     if (!canSend) return;
     void run(async signal => {
-      await api.add(session, draft, signal);
+      const { committedVersion } = await api.add(session, draft, signal);
       if (signal.aborted) return;
       setDraft('');
-      await refresh(signal);
-      if (!signal.aborted && !search) setScrollRequest(value => value + 1);
+      scrollAfterSend(committedVersion);
+      refresh(committedVersion);
     }, true);
   }
 
   function confirm() {
     setConfirmation(undefined);
     if (!confirmation) return;
-    if (confirmation.kind === 'leave') { onLeave(); return; }
+    if (confirmation.kind === 'leave') {
+      stop();
+      active.current?.abort();
+      onLeave();
+      return;
+    }
+    if (!canWrite) return;
     void run(async signal => {
       if (confirmation.kind === 'close') {
         await api.close(session, signal);
-        if (!signal.aborted) onInvalid('room');
+        if (!signal.aborted) {
+          stop();
+          invalidate('room');
+        }
         return;
       }
       if (confirmation.kind === 'delete') {
-        await api.delete(session, confirmation.id, signal);
-        if (!signal.aborted) await refresh(signal);
+        const { committedVersion } = await api.delete(session, confirmation.id, signal);
+        if (!signal.aborted) refresh(committedVersion);
       }
     }, true);
   }
@@ -196,7 +205,8 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
 
   return <div className="room-page">
     <header className="room-header"><div className="room-row"><Logo />
-      <div className="header-actions"><span className="online"><i aria-hidden="true" />3 人在線</span>
+      <div className="header-actions"><span className="room-sync" data-current={status === 'current'} role="status">
+        <i aria-hidden="true" />{syncText[status]}</span>
         <button ref={searchButton} type="button" className="button ghost icon-button" aria-label="搜尋"
           aria-expanded={search} onClick={() => { setMenu(false); if (search) closeSearch(); else setSearch(true); }}><Icon name="search" /></button>
         <div className="menu-host" ref={menuHost} onKeyDown={event => { if (event.key === 'Escape') setMenu(false); }}>
@@ -204,7 +214,7 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
           {menu && <div className="room-menu"><ThemeOptions theme={theme} onChange={onTheme} />
             <button className="menu-action" type="button" disabled={pending} onClick={reload}>重新整理</button>
             <div className="menu-divider" />
-            {session.isCreator ? <button className="menu-action destructive" type="button" disabled={pending || needsRefresh}
+            {session.isCreator ? <button className="menu-action destructive" type="button" disabled={!canWrite}
               onClick={() => { setMenu(false); setConfirmation({ kind: 'close' }); }}>關閉房間 <small>房主</small></button>
               : <button className="menu-action destructive" type="button"
                 onClick={() => { setMenu(false); setConfirmation({ kind: 'leave' }); }}>離開房間</button>}
@@ -231,45 +241,66 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
     </section>}
     <div className="room-notices">
         {!saved && <StatusNotice title="身分只保存在這次開啟的頁面">瀏覽器不允許保存身分，重新整理後會失去目前身分。</StatusNotice>}
-        {error && <ErrorNotice error={error.value} uncertain={error.uncertain} />}
+        {error ? <ErrorNotice error={error.value} uncertain={error.uncertain} />
+          : syncError !== undefined && <ErrorNotice error={syncError} />}
         {copyFeedback?.kind === 'fallback' && <CopyFallback value={copyFeedback.text} close={() => setCopyFeedback(undefined)} />}
     </div>
     <div className="copy-toast" role="status">
       {copyFeedback?.kind === 'success' && <span>{copyFeedback.message}</span>}
     </div>
-    <main className="chat-scroll" ref={list} aria-label="房間文字" aria-busy={pending}>
-      <div className="chat-body">
-        {!snapshot && pending && <p className="empty-chat" role="status">正在讀取文字…</p>}
-        {snapshot && shown.length === 0 && (pattern ? <div className="empty-chat"><strong>找不到符合的文字</strong>
-          <p>只會搜尋這個房間目前載入的內容。</p></div> : <div className="empty-chat"><strong>房間還沒有文字</strong>
-          <p>送出一段文字，或分享邀請給另一台裝置。</p></div>)}
-        {shown.map((item, index) => {
-          const date = new Date(item.createdAt);
-          const day = dateFormat.format(date);
-          const time = timeFormat.format(date);
-          const insertDate = !search && (index === 0 || day !== dateFormat.format(new Date(shown[index - 1].createdAt)));
-          return <div key={item.id} className="message-group">
-            {insertDate && <div className="date-divider"><time dateTime={item.createdAt}>
-              {day === dateFormat.format(new Date()) ? '今天' : day} {time}</time></div>}
-            <article className={`message${item.isOwn ? ' mine' : ''}`}><p className="speaker">{item.isOwn ? '你' : '訪客'}</p>
-              <div className="bubble"><MessageText content={item.content} pattern={pattern} /></div>
-              <div className="message-actions"><time dateTime={item.createdAt}>{time}</time>
-                <button type="button" onClick={() => void copy(item.content, '已複製文字')}>複製</button>
-                {item.isOwn && item.canDelete && <button type="button" disabled={pending || needsRefresh}
-                  onClick={() => setConfirmation({ kind: 'delete', id: item.id })}>刪除</button>}
-              </div>
-            </article>
-          </div>;
-        })}
-        {!search && <div className="manual-update"><StatusNotice title="其他裝置的新內容不會自動出現"
-          action={<Button disabled={pending} onClick={reload}><Icon name="refresh" />重新整理</Button>}>
-          按「重新整理」取得最新內容。</StatusNotice></div>}
-      </div>
-    </main>
+    <div className="chat-area">
+      <main className="chat-scroll" ref={list} tabIndex={-1} onScroll={onScroll}
+        onWheel={interruptJump} onPointerDown={interruptJump} onKeyDown={onScrollKey}
+        aria-label="房間文字" aria-busy={pending || status === 'syncing'}>
+        <div className="chat-body" ref={content}>
+          {!snapshot && syncError === undefined && <p className="empty-chat" role="status">正在讀取文字…</p>}
+          {snapshot && shown.length === 0 && (pattern ? <div className="empty-chat"><strong>找不到符合的文字</strong>
+            <p>只會搜尋這個房間目前載入的內容。</p></div> : <div className="empty-chat"><strong>房間還沒有文字</strong>
+            <p>送出一段文字，或分享邀請給另一台裝置。</p></div>)}
+          {shown.map((item, index) => {
+            const previous = shown[index - 1];
+            const date = new Date(item.createdAt);
+            const day = dateFormat.format(date);
+            const time = timeFormat.format(date);
+            const insertDate = !search && (!previous || day !== dateFormat.format(new Date(previous.createdAt)));
+            const sameAuthor = previous && item.isOwn === previous.isOwn
+              && (item.isOwn || item.authorCode === previous.authorCode);
+            const grouped = !insertDate && sameAuthor
+              && Math.abs(date.getTime() - Date.parse(previous.createdAt)) <= authorGroupGapMs;
+            const speakerId = `speaker-${item.id}`;
+            return <div key={item.id} className="message-group">
+              {insertDate && <div className="date-divider"><time dateTime={item.createdAt}>
+                {day === dateFormat.format(new Date()) ? '今天' : day} {time}</time></div>}
+              <article className={`message${item.isOwn ? ' mine' : ''}`} aria-labelledby={speakerId}>
+                <p id={speakerId} className={grouped ? 'speaker visually-hidden' : 'speaker'}
+                  data-author-color={item.isOwn ? undefined : authorColor(item.authorCode)}>
+                  {formatAuthor(item.isOwn ? '你' : item.authorCode, item.authorIsCreator)}
+                </p>
+                <div className="bubble"><MessageText content={item.content} pattern={pattern} /></div>
+                <div className="message-actions"><time dateTime={item.createdAt}>{time}</time>
+                  <button type="button" onClick={() => void copy(item.content, '已複製文字')}>複製</button>
+                  {item.isOwn && item.canDelete && <button type="button" disabled={!canWrite}
+                    onClick={() => setConfirmation({ kind: 'delete', id: item.id })}>刪除</button>}
+                </div>
+              </article>
+            </div>;
+          })}
+          {!search && (status === 'stale' || status === 'disconnected') &&
+            <div className="manual-update"><Button disabled={pending} onClick={reload}><Icon name="refresh" />重新整理</Button></div>}
+        </div>
+      </main>
+      {showJump && <Button className="jump-to-latest" variant="soft" onClick={jumpToLatest}
+        aria-label={unreadCount > 0 ? `跳到最新，${countFormat.format(unreadCount)} 則新訊息` : undefined}>
+        <Icon name="down" />跳到最新
+        {unreadCount > 0 && <span className="jump-unread">{countFormat.format(unreadCount)}</span>}
+      </Button>}
+    </div>
     <footer className="composer-footer"><form className="composer" onSubmit={event => { event.preventDefault(); send(); }}>
       <div className="composer-input"><textarea ref={input} rows={1} aria-label="要送出的文字" placeholder="輸入或貼上文字…"
-        aria-describedby={draft ? 'byte-counter' : undefined} aria-invalid={over} value={draft} readOnly={pending}
+        aria-describedby={draft ? 'composer-identity byte-counter' : 'composer-identity'} aria-invalid={over} value={draft} readOnly={pending}
         onChange={event => setDraft(event.target.value)} />
+        <p className="composer-identity" id="composer-identity">你是 <span data-author-color={authorColor(session.authorCode)}>
+          {formatAuthor(session.authorCode, session.isCreator)}</span></p>
         {draft && <p className={`byte-counter${over ? ' over' : ''}`} id="byte-counter">
           {countFormat.format(bytes)} / 8,192 bytes {over && '・超過上限'}</p>}</div>
       <Button className="send" type="submit" variant="primary" disabled={!canSend} aria-label="送出"><Icon name="send" /></Button>
