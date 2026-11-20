@@ -8,7 +8,9 @@
 
 以小範圍、可驗證的變更逐步完成 MVP。每階段可分成數個獨立 Review 的小 patch；先執行與本次變更相關的 Build／Lint／Tests，記錄實際結果，不在全部完成前稱 MVP 已完成。
 
-順序：**S1 正式持久層與 DB 正確性 → S2 房間／匿名授權 → S3 文字／快照列表 → S4 基本 UI → S5 方案 A 即時同步 → S6 清理／冷卻 → S7 防護／資源 → S8 壓測與收尾**。
+既有交付順序為 S1 持久層 → S2 匿名授權 → S3 文字／快照 → S4 基本 UI → S5 即時同步。後續順序為 **S6 → Logging → Health Checks → OpenTelemetry → S7 → Deployment → S8 → Seq／AWS**。
+
+OpenTelemetry 先提供 S8 所需的指標。S7 先處理讀取 admission 耗盡、反覆 Join 耗盡名額等風險。Deployment 之後再以近正式的容器環境壓測。公開部署的判定及部署取捨見 [ADR 0004](decisions/0004-observability-and-deployment.md)。
 
 S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用。S2 開始已有基本輸入、Credential 脫敏與 ADR 0003 的基本限流；S7 補齊其餘分層防護並做完整安全／資源驗證。S7 完成前只在隔離本機環境驗證，不發布公開站台。
 
@@ -114,7 +116,27 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 - 造超過 100 房的 backlog，驗證分批、公平選失效時間及每輪時間預算；量測健康情況失效後 10 分鐘目標，超時有 backlog／最久失效指標。
 - 到期／關房 group 清除可能遺漏時，REST 與後續 Hub 驗證仍拒絕，Client 校正清 UI；不保留歷史查詢／還原。
 
-## 8. S7：安全、資源與監控整合
+## 8. Logging
+
+- 開工前提出套件方案。直接新增 `Serilog.AspNetCore`，業務層維持 `ILogger<T>`。Console 開發輸出可讀文字，正式輸出 CLEF 或同等 JSON，包含 UTC 時間、Level、EventId、Message、TraceId、SpanId、ServiceName、Environment、ApplicationVersion。
+- 正式預設 Information 且可設定，過濾 ASP.NET Core／EF Core。用 `MinimumLevel.Override` 重建目前 Hosting Diagnostics 的 Warning 門檻，停用 `UseSerilogRequestLogging()`，避免一般成功請求、心跳與廣播產生 Information。
+- 保留 `ApiFailureMiddleware`。Hub Filter 的未預期例外記固定 EventId、例外型別及堆疊框架。例外物件、Message、方法參數與完整 HTTP Body 排除在日誌外，預期業務錯誤與已知 `HubException` 維持低於 Error。
+- 驗收需先證明測試 provider 實際收到事件，再驗證憑證、房碼與文字均未出現。用 `writeToProviders: true` 或等效方式保留既有 `RoomApiTests`、`RoomCleanupTests`，並驗證 Console 與 provider 無重複事件。測試涵蓋 `/r/{code}`、Hub query 與失敗路徑。
+
+## 9. Health Checks
+
+- `/health/live` 僅檢查程序。 `/health/ready` 以既有 API `NpgsqlDataSource` 執行有界的低成本查詢，如 `SELECT 1`。使用 ASP.NET Core 內建功能。
+- 另提清理 Worker 狀態的呈現方式，回報最後成功時間及連續失敗輪數。Worker 故障與追趕進度均不改變 live／ready 結果。端點略過現有限流與驗證，回應不含敏感資料或內部細節，成功探針不寫 Information。部署時只在內部開放。
+- 驗收涵蓋 DB 不可達時 live 正常、ready 失敗，Worker 失敗時兩種探針結果依原條件判定，以及代理外部無法存取健康端點。
+
+## 10. OpenTelemetry
+
+- 開工前提 Hosting 擴充、ASP.NET Core instrumentation 與 OTLP exporter 方案。有 OTLP 端點才註冊 exporter，無設定時仍正常運作。日誌維持 Serilog。
+- HTTP 數量、錯誤率、耗時與 SignalR 連線優先訂閱 .NET 內建 meter。用 `System.Diagnostics.Metrics` 增加清理失敗及 Item 新增失敗計數。RoomId、ItemId、TraceId、ParticipantId、ConnectionId 與房碼禁止用作 metric tag。
+- Tracing 從 ASP.NET Core 起步，採 W3C Trace Context，正式環境採樣可調。EF Core／Npgsql tracing 另確認需求與重複 span。文件說明 negotiate、WebSocket handshake 與 Hub 方法各自的 trace 範圍，依所選版本驗證。
+- 驗收檢查實際輸出的 `url.path`、`url.query`、`url.full` 等屬性及 SignalR 相關 span，確保無 `access_token` 與實際房碼。核對套件版本的 query 遮蔽，並驗證明確的匯出前清理；metrics 的 `http.route` 使用路由模板。S8 前確認隔離環境有可接收和查詢 OTLP 的接收端。
+
+## 11. S7：安全、資源與監控整合
 
 在 S2／S3 的基本限流之上，依壓測／安全測試補齊 ADR 0003 延後的項目：公開錯碼退避／全站壓力模式、Hub 方法與 SignalR 連線配額、分類 HTTP 並行、部署資源 admission、bounded partition 與恢復遲滯；並校正需求第 5 節的候選值。敏感資訊脫敏／CSP／Origin／代理驗證及指標分開 Review。
 
@@ -128,7 +150,21 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 - 不引入全站 DB 配額列，不用 Room.TotalBytes 拒絕總量；監控資源與查 SQL／鎖等待，確認每次寫入不爭用額外全站列。
 - 日誌、代理／APM／SignalR access_token 全鏈路檢查無正文／明文 Credential；CORS 不替代 WebSocket Origin／同房授權。
 
-## 9. S8：負載證據、驗收與文件收尾
+## 12. Deployment
+
+S7 完成後交付。代理與瀏覽器驗收可先使用隔離容器環境。新增元件及公開端點依 AGENTS.md 先提方案。
+
+| 工作 | 交付與驗收 |
+| --- | --- |
+| 同源靜態檔 | ASP.NET Core 提供 Vite 建置檔，開發維持 Vite。`ApiFailureMiddleware` 的 `no-store` 限定 API、Hub 等敏感回應。`index.html` 使用 `no-cache`，帶內容 hash 的資產長期快取。驗證刷新 `/r/{code}`、SPA fallback 排除 `/api`、`/hubs`、`/health` 及遺失靜態檔；測試 CSP、`Referrer-Policy: no-referrer`、HSTS、`X-Content-Type-Options: nosniff` 及 WSS。 |
+| Caddy／TLS | 內網用 Internal CA 或自備憑證，AWS 用公開信任憑證，localhost 開發可用 HTTP。初始化設定主機名稱／IP 與 SAN，持久化 CA 及 Caddy 資料。提供電腦、iOS、Android 的根憑證信任步驟，實機驗證 Clipboard API。Caddy 與應用程式解耦。驗收 access log 及錯誤路徑已遮蔽 URL 房碼、`access_token` 等敏感資料。 |
+| 可信代理 | 在既有可信 IP 外支援明確 CIDR allowlist，固定 Compose 代理子網範圍，API host port 維持不發布。驗收偽造 X-Forwarded-For／Proto 與來源 IP、HTTPS scheme、SignalR Origin 及限流所用的真實 Client IP；`/health/*` 只對內。 |
+| Migration 與啟動 | 獨立一次性 Job，DB 未就緒時有限等待；Job 失敗不得啟動不相容 API。API 啟動時以 DML 帳號唯讀檢查 schema／遷移歷史，確認不相容記 Critical 並以非零碼退出；短暫無法連線先有限重試。開工時定義高於應用版本的 schema 處置。確認已遷移、未遷移、暫時不可達、測試隔離 schema，以及 EF Core 10／現行 Npgsql 的並行 migration lock 行為。DDL 帳號與 API 帳號最小權限分離，readiness 只做低成本 DB 探針。 |
+| Compose | 正式設定放 `deploy/`，根目錄測試用 `compose.yaml` 保留。初始化用 `.env.example` 說明密碼、主機、TLS、持久化設定，未提供必要設定須拒絕啟動。初始化後支援 `docker compose up -d`。服務使用 stdout／stderr 與有界輪替，例如 `local` driver 的 `max-size: 10m`、`max-file: 5`，驗證目標 Docker／NAS 相容性並提供替代 driver。日誌與 DB 資料各有保存期限。 |
+
+CSP 初稿為 `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`。Vite 將 logo SVG 內嵌供 `mask-image` 使用，需保留 `img-src` 的 `data:`。依部署來源及瀏覽器驗證 `connect-src` 是否須明確列出同源 WSS。
+
+## 13. S8：負載證據、驗收與文件收尾
 
 交付可重跑負載情境／版本與硬體設定、結果報告、查詢計畫／主要瓶頸、最終候選設定調整與已知限制；補齊操作／本機啟動及測試說明。使用既定單實例，不因測試數字就新增 Redis 等基礎設施。
 
@@ -140,15 +176,18 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 | 同一 NAT／公司／學校出口 | 既有千條連線與新加入速率分開測；合法成功率／429，不能只用不同 IP 模擬就聲稱支援 NAT |
 | 熱房／最大文字 | 高集中度多人新增刪除、300 筆×8 KiB；觀察整份快照重抓的頻寬、DB 讀取、UI 收斂；據此決定是否以新 ADR 恢復分頁 |
 | 重連／通知遺漏 | 大量同時重連 jitter、全部或部分提示遺漏、回前景補償；修復主目標 20～30 秒、健康情況約 60 秒容許上限 |
-| 濫用／資源／清理 | 分散錯碼、partition 耗盡、pool／CPU／記憶體／磁碟壓力、過期 backlog 與清理保留資源 |
+| 濫用／資源／清理 | 分散錯碼、partition 耗盡、pool／CPU／記憶體／磁碟壓力、過期 backlog 與清理保留資源。在近正式容器環境使用 OTel 指標，量測重房（1,000 Participants＋300 筆 × 8 KiB）的最壞批次耗時、縮批後的吞吐與失效至刪除延遲，驗證是否達 10 分鐘目標。 |
 
 候選基準為 app／DB 各 4 vCPU／8 GiB、每房初始 50 筆／平均 1 KiB、全站每秒 20 次平衡新增／刪除、30 分鐘，再做階梯與邊界；REST p95 ≤ 500 ms、提交到畫面 p95 ≤ 2 秒仍待量測核定。測試報告一併列合法成功率、429／5xx、實際接收通知／同步量、修復分布、DB lock／pool 等待及資源，不用拒絕正常流量粉飾達標。
 
 S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間目標，如實標示未達與瓶頸／調整提案，不標成已支援；涉及架構改動另 Review。完整 Build／Lint／相關 Tests 通過後，無新修改或疑慮不重複擴大測試。
 
-## 10. 下一個實作任務與完成回報
+## 14. Seq／AWS
 
-S1 已合併。S2 已由 PR #5 合併至 main `9eace5f`，使用者已確認測試審查 OK。S3-01 從 main 開立 `feature/s3-01-item-write-api`，接文字新增／刪除與 Participant 寫入配額，包含關房的刪除配額；不改 schema、不加套件。工作項見 [S3 計畫](s3-items.md)。
+- Seq 為選配 `monitoring` Compose profile，固定官方映像版本、持久化資料、預設 host 連接埠綁 `127.0.0.1`。初始管理員密碼透過 `.env`，驗證初次啟動、持久卷重啟、保留期限及管理存取。啟用前由使用者確認官方授權與 EULA。Serilog Seq sink 可設定開關，保留 Console，驗收 Seq 離線時 Pasto 仍能啟動及服務。
+- AWS 交付部署建議文件。ECS 用 `awslogs`，EC2＋Compose 用 agent 或 forwarder，由基礎設施管理 CloudWatch、最小權限 IAM、保存期限與警報。驗收文件涵蓋收集路徑、URL／日誌脫敏配置及故障行為，應用程式維持 Console 輸出。
 
-目前交付點為 S3-01 獨立 review；之後再接 S3-02 整份快照列表。不因部分 API 完成而宣稱 MVP 完成；沒有授權時不合併或推送。實際測試與失敗紀錄見 [testing.md](testing.md)。
+## 15. 下一個實作任務與完成回報
+
+S6 第一項已完成。文件批次記錄 [ADR 0004](decisions/0004-observability-and-deployment.md) 與後續各階段驗收。下一項先提出房碼冷卻回收與 SignalR 連線清理方案，依 [TODO.md](../TODO.md) 核對工作狀態。實際測試與失敗紀錄見 [testing.md](testing.md)。
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。

@@ -24,6 +24,8 @@
 
 目前交付點與下一步見 [TODO.md](TODO.md)，整體規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
+部署規劃以自架 Docker Compose 為主，AWS 及外部監控為選配。目前根目錄 `compose.yaml` 供本機 PostgreSQL 整合測試。S7 防護完成前，部署環境須限可信任裝置與使用者存取。 [部署政策與取捨](docs/decisions/0004-observability-and-deployment.md)
+
 ## MVP 範圍
 
 - 匿名建房，不需註冊或登入；房間建立後固定 5 小時失效

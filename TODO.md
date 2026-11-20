@@ -16,6 +16,7 @@
 | S5 實作分支 | `feature/s5-signalr-sync`，由包含 S4 合併點的 `main@efbcb73` 建立 |
 | S5 合併 | [PR #8](https://github.com/ARueiz/Pasto/pull/8) 已於 2026-11-20 合併至 `main@98424e6`（Asia/Taipei） |
 | S6 工作分支 | `feature/s6-room-cleanup`，由包含 S5 合併與交付紀錄的本機 `main` 建立 |
+| S6 第一項提交 | `8e3d1bf`，主資料清理、Worker 收尾及 P3，審查無阻擋問題 |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -46,8 +47,13 @@
   - [x] 主資料清理實作與專項驗證。分批實體刪除失效房間，跳過鎖定房間並保留房碼。批次逾時時減半，最小到 1，滿批成功後逐步恢復。Worker 記錄連續失敗輪數並繼續下一輪。
   - [x] 收尾 P3 修正。整輪預算用完時若已有房間刪除成功提交，記錄 `6006`、歸零連續失敗輪數；無進度仍記錄 `6002` 並累加。
   - [ ] 房碼保留紀錄回收與 SignalR 連線清理。
+- [ ] Logging：結構化日誌與 Hub 例外。
+- [ ] Health Checks：存活、DB 就緒與 Worker 狀態。
+- [ ] OpenTelemetry：指標、Tracing 與選配 OTLP。
 - [ ] S7：防護、資源與濫用處理。
+- [ ] Deployment：同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose。
 - [ ] S8：壓測與收尾。
+- [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
 ## 最新驗證
 
@@ -94,7 +100,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-2026-11-20，`feature/s6-room-cleanup` 已完成 S6 第一個工作項目及 Worker 收尾。審查無阻擋問題。依規格先更新部署與可觀測性文件，下一個 S6 工作項目為房碼保留紀錄回收與 SignalR 連線清理。 [S6 實作計畫](docs/sprint-1-implementation-plan.md) · [測試紀錄](docs/testing.md#s6-整輪預算-p3-驗證2026-11-20)
+2026-11-20，S6 第一項已在 `feature/s6-room-cleanup` 提交至 `8e3d1bf`，可觀測性與部署文件已更新。下一個 S6 工作項目先提出房碼保留紀錄回收與 SignalR 連線清理方案。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
@@ -106,14 +112,10 @@ S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非�
 - S7：少數來源可耗盡共用的驗證前 read admission，影響讀取，也會阻擋新增文字、刪除文字與關房。Participant 寫入配額不會緩解此入口風險。
 - S7：持有分享連結者可反覆 Join 耗盡 1,000 個生命週期 Participant 名額。
 - S7／S8：實測以控制字元填滿 300 筆時的 JSON 回應大小與讀取頻寬。S8 另測 1,000 條連線同時重抓。
-- **S7 防護補齊前不得公開部署**；已記錄風險不代表已緩解，不自行調整既定配額。
+- **S7 防護完成前不得公開部署**。任何不受信任的裝置或使用者可連線的環境都算公開部署，包括可由訪客 Wi-Fi 或 BYOD 存取的內網。受信任內網仍需驗證、限流與敏感資料保護。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md)
 - S4 P3：在選單按 Esc，或用 Esc 取消確認對話框之後，焦點會掉到 `<body>`。建議把焦點還給「更多選項」按鈕。
 - S4 P3：浮動複製提示的垂直位置寫死在 128px（`4 * --space-8`）。放大字級或展開 QR 面板時，提示會疊在其他元素上。它設了 `pointer-events: none`，不會擋到點擊。
-- S7／部署（AWS）：要決定前端由 CloudFront＋S3 提供，或由後端直接提供建置好的檔案。這屬於新增基礎設施，要先提方案、等使用者確認。部署時要設定以下 header：
-  - CSP 初稿：`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`。其中 `img-src` 必須允許 `data:`，因為 Vite 把 logo 的 SVG 內嵌成 `data:` URI，用在 `mask-image` 上。
-  - `Referrer-Policy: no-referrer`、HSTS、`X-Content-Type-Options: nosniff`。
-  - 快取：`index.html` 設 `no-cache`；帶 hash 的 `assets/` 設長期快取。
-  - 驗證方式：用 `vite preview` 套上這組 header 跑 e2e。S5 加入 SignalR 後，要再確認 `connect-src` 是否涵蓋 `wss://`。
+- Deployment 以自架 Compose 與 ASP.NET Core 同源靜態檔為基準。CSP、WSS、安全 header、快取與代理驗收見 [Deployment 計畫](docs/sprint-1-implementation-plan.md#12-deployment)。
 
 ## 文件入口與維護
 
