@@ -43,10 +43,19 @@
 - [x] S5 合併。[PR #8](https://github.com/ARueiz/Pasto/pull/8) 已合併至 `main@98424e6`。
 - [x] 依 AGENTS.md §10 更新 README 與 TODO，記錄合併 PR、S5 交付及 S6。
 - [ ] S6：到期／關房資料清理。
+  - [x] 主資料清理實作與專項驗證。分批實體刪除失效房間，跳過鎖定房間並保留房碼。批次逾時時減半，最小到 1，滿批成功後逐步恢復。Worker 記錄連續失敗輪數並繼續下一輪。
+  - [x] 收尾 P3 修正。整輪預算用完時若已有房間刪除成功提交，記錄 `6006`、歸零連續失敗輪數；無進度仍記錄 `6002` 並累加。
+  - [ ] 房碼保留紀錄回收與 SignalR 連線清理。
 - [ ] S7：防護、資源與濫用處理。
 - [ ] S8：壓測與收尾。
 
 ## 最新驗證
+
+S6 整輪預算 P3 修正的 Release Build、格式檢查、真 PostgreSQL 專項 12 例及完整回歸 296 例通過。 [測試紀錄](docs/testing.md#s6-整輪預算-p3-驗證2026-11-20)
+
+S6 Worker 收尾的 Release Build、格式檢查、真 PostgreSQL 專項 10 例及完整回歸 294 例通過。 [測試紀錄](docs/testing.md#s6-主資料清理收尾驗證2026-11-20)
+
+S6 主資料清理的 Release Build 與格式檢查通過，真 PostgreSQL 專項 6 例通過，最終完整回歸 290 例通過。首輪既有快照測試的索引斷言失敗與基準診斷見 [測試紀錄](docs/testing.md#s6-主資料清理驗證2026-11-20)。
 
 2026-11-20 合併前修整的前端 Lint、Build 與完整 Edge 28 例通過，涵蓋跨午夜作者標籤與鍵盤中斷平滑捲動。 [測試紀錄](docs/testing.md#s5-合併前修整驗證2026-11-20)
 
@@ -85,7 +94,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-2026-11-20，S5 已透過 [PR #8](https://github.com/ARueiz/Pasto/pull/8) 合併至 `main`，README 與 TODO 已同步更新。下一步在 `feature/s6-room-cleanup` 實作 S6 第一個工作項目，分批清理到期與關房的主資料。房碼保留紀錄回收與連線清理在下一個工作項目處理。 [S6 實作計畫](docs/sprint-1-implementation-plan.md)
+2026-11-20，`feature/s6-room-cleanup` 已完成 S6 第一個工作項目及 Worker 收尾。審查無阻擋問題。依規格先更新部署與可觀測性文件，下一個 S6 工作項目為房碼保留紀錄回收與 SignalR 連線清理。 [S6 實作計畫](docs/sprint-1-implementation-plan.md) · [測試紀錄](docs/testing.md#s6-整輪預算-p3-驗證2026-11-20)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
