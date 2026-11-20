@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Pasto.Server.Application.Rooms;
+using Pasto.Server.Observability;
 
 namespace Pasto.Server.Infrastructure.Persistence;
 
@@ -16,6 +17,8 @@ internal sealed class RoomCleanupWorker(
     CleanUpRooms cleanup,
     RoomCleanupStore store,
     RoomConnections connections,
+    RoomCleanupStatus status,
+    ServerMetrics metrics,
     IStorageFailureClassifier storageFailures,
     TimeProvider timeProvider,
     ILogger<RoomCleanupWorker> logger) : BackgroundService
@@ -34,7 +37,6 @@ internal sealed class RoomCleanupWorker(
         if (!options.Value.Enabled)
             return;
 
-        var consecutiveFailures = 0;
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), timeProvider);
         do
         {
@@ -44,7 +46,7 @@ internal sealed class RoomCleanupWorker(
             try
             {
                 await cleanup.ExecuteAsync(progress, round.Token);
-                consecutiveFailures = 0;
+                status.RecordSuccess(timeProvider.GetUtcNow());
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -52,7 +54,7 @@ internal sealed class RoomCleanupWorker(
             }
             catch (OperationCanceledException) when (budget.IsCancellationRequested && progress.CommittedBatches > 0)
             {
-                consecutiveFailures = 0;
+                status.RecordSuccess(timeProvider.GetUtcNow());
                 logger.LogWarning(RoundIncomplete,
                     "Room cleanup reached the round time budget after committing {CommittedBatches} batches and deleting {DeletedRooms} rooms",
                     progress.CommittedBatches, progress.DeletedRooms);
@@ -60,24 +62,24 @@ internal sealed class RoomCleanupWorker(
             catch (OperationCanceledException) when (budget.IsCancellationRequested)
             {
                 logger.LogWarning(RoundTimedOut, "Room cleanup reached the round time budget. Consecutive failures: {ConsecutiveFailures}",
-                    ++consecutiveFailures);
+                    RecordFailure());
             }
             catch (RoomCleanupBatchTimeoutException)
             {
                 logger.LogWarning(SingleRoomTimedOut, "Room cleanup timed out at batch size {BatchSize}. Consecutive failures: {ConsecutiveFailures}",
-                    1, ++consecutiveFailures);
+                    1, RecordFailure());
             }
             catch (Exception exception) when (storageFailures.IsStorageFailure(exception))
             {
                 var postgres = exception as PostgresException ?? exception.GetBaseException() as PostgresException;
                 logger.LogWarning(DatabaseFailure,
                     "Room cleanup database operation failed ({ErrorType}, SQLSTATE {SqlState}). Consecutive failures: {ConsecutiveFailures}",
-                    exception.GetType().Name, postgres?.SqlState, ++consecutiveFailures);
+                    exception.GetType().Name, postgres?.SqlState, RecordFailure());
             }
             catch (Exception exception)
             {
                 logger.LogError(UnexpectedFailure, "Room cleanup failed ({ErrorType}). Consecutive failures: {ConsecutiveFailures}. Frames: {StackFrames}",
-                    exception.GetType().Name, ++consecutiveFailures, new StackTrace(exception, false).ToString());
+                    exception.GetType().Name, RecordFailure(), new StackTrace(exception, false).ToString());
             }
 
             await RunMaintenanceAsync(CleanUpConnectionsAsync, ConnectionCleanupDelayed, stoppingToken);
@@ -85,6 +87,12 @@ internal sealed class RoomCleanupWorker(
             connections.ReportUntrackedSubscriptions();
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    private int RecordFailure()
+    {
+        metrics.CleanupFailed();
+        return status.RecordFailure();
     }
 
     private async Task RunMaintenanceAsync(Func<CancellationToken, Task> run, EventId failure, CancellationToken stoppingToken)

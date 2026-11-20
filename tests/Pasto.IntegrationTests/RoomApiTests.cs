@@ -198,8 +198,9 @@ public sealed class RoomApiTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var credential = body.RootElement.GetProperty("credential").GetString()!;
-        Assert.Contains(logs.Entries, entry => entry.Category.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal)
-            && entry.Level == LogLevel.Error);
+        Assert.Single(logs.Entries, entry => entry.Category == typeof(CreateRoom).FullName
+            && entry.Level == LogLevel.Warning && entry.Text.Contains("Room code collision", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Entries, entry => entry.Category.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal));
         Assert.DoesNotContain("TAKEN1", logs.Text);
         Assert.DoesNotContain("FRESH1", logs.Text);
         Assert.DoesNotContain(credential, logs.Text);

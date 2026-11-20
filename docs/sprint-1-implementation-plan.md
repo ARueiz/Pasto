@@ -133,6 +133,7 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 ## 9. Health Checks
 
 - `/health/live` 僅檢查程序。 `/health/ready` 以既有 API `NpgsqlDataSource` 執行有界的低成本查詢，如 `SELECT 1`。使用 ASP.NET Core 內建功能。
+- `/health/cleanup` 回報 Worker 是否啟用、最後成功時間與連續失敗輪數。已提交進度的預算耗盡仍視為成功，與 S6 的失敗輪數規則一致。
 - 另提清理 Worker 狀態的呈現方式，回報最後成功時間及連續失敗輪數。Worker 故障與追趕進度均不改變 live／ready 結果。端點略過現有限流與驗證，回應不含敏感資料或內部細節，成功探針不寫 Information。部署時只在內部開放。
 - 驗收涵蓋 DB 不可達時 live 正常、ready 失敗，Worker 失敗時兩種探針結果依原條件判定。
 - 外部流量無法存取 `/health/*` 的驗收列在 [Deployment](#12-deployment) 的可信代理項目。
@@ -140,7 +141,9 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 ## 10. OpenTelemetry
 
 - 開工前提 Hosting 擴充、ASP.NET Core instrumentation 與 OTLP exporter 方案。有 OTLP 端點才註冊 exporter，無設定時仍正常運作。日誌維持 Serilog。
-- HTTP 數量、錯誤率、耗時與 SignalR 連線優先訂閱 .NET 內建 meter。用 `System.Diagnostics.Metrics` 增加清理失敗及 Item 新增失敗計數。RoomId、ItemId、TraceId、ParticipantId、ConnectionId 與房碼禁止用作 metric tag。
+- HTTP 數量、錯誤率、耗時與 SignalR 連線優先訂閱 .NET 內建 meter。Client 錯誤率以 `http.server.request.duration` 依 `http.response.status_code` 觀察。兩個自訂計數器均無 tag，RoomId、ItemId、TraceId、ParticipantId、ConnectionId 與房碼禁止用作 metric tag。
+  - `pasto.item.add.failures` 計入 `AddItem.ExecuteAsync` 拋出且由 `ApiFailureMiddleware` 對應為 HTTP 5xx 的例外，例如儲存失敗、房間忙碌及未預期例外。排除 4xx 與 Client 已取消請求所引發的取消例外。
+  - `pasto.cleanup.failures` 在主資料清理輪次失敗時加一，與 `/health/cleanup` 的 `consecutiveFailures` 採用相同的失敗判定。連線複驗及房碼回收的失敗維持既有 EventId 日誌。
 - Tracing 從 ASP.NET Core 起步，採 W3C Trace Context，正式環境採樣可調。EF Core／Npgsql tracing 另確認需求與重複 span。文件說明 negotiate、WebSocket handshake 與 Hub 方法各自的 trace 範圍，依所選版本驗證。
 - 驗收檢查實際輸出的 `url.path`、`url.query`、`url.full` 等屬性及 SignalR 相關 span，確保無 `access_token` 與實際房碼。核對套件版本的 query 遮蔽，並驗證明確的匯出前清理；metrics 的 `http.route` 使用路由模板。本機驗收須把指標和 trace 實際送到獨立容器的 .NET Aspire Dashboard 並查看，核對 Dashboard 實際接收的 trace 與日誌符合跨階段遮蔽要求，沒有房碼、`access_token`、Credential 或使用者文字。用 `dotnet-counters` 驗證可即時讀取執行中程序的內建 meter 和自訂 meter。日誌收集依既有選型，產品仍由 Serilog 輸出。
 - `dotnet-counters` 與 Aspire Dashboard 只用於開發及 S8 隔離測試。Dashboard 使用固定版本的官方映像，發布的連接埠只綁 `127.0.0.1`，保留內建存取驗證，資料只在記憶體，不需持久化。標準 `deploy/` 啟動不包含 Dashboard。
@@ -200,5 +203,5 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 15. 下一個實作任務與完成回報
 
-S6 主資料、房碼冷卻回收與 SignalR 連線清理已完成審查並提交至工作分支。下一步先完成 Logging 階段方案確認。後續階段依 [ADR 0004](decisions/0004-observability-and-deployment.md) 與 [TODO.md](../TODO.md) 接續。實際測試與失敗紀錄見 [testing.md](testing.md)。
+S6 主資料、房碼冷卻回收與 SignalR 連線清理已完成審查並提交至工作分支。Logging、Health Checks 與 OpenTelemetry 已在 `feature/observability` 驗證，後續依 [TODO.md](../TODO.md) 進入 S7。實際測試與失敗紀錄見 [testing.md](testing.md)。
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。
