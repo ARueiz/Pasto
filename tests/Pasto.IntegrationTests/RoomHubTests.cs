@@ -24,6 +24,28 @@ public sealed class RoomHubTests
     private const string HubPath = "/hubs/room";
 
     [Fact]
+    public async Task UnexpectedHubFailure_UsesOneSanitizedApplicationEvent()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var room = await CreateRoomAsync(database);
+        using var logs = new HubFailureLogs();
+        await using var factory = new PastoApiFactory(database.ConnectionString, configureServices: services =>
+            services.AddSingleton<IRoomStateStore>(new FailedRoomState()), logs: logs);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var socket = await ConnectAsync(factory, room.Credential, deadline.Token);
+        var hub = new HubMessages(socket, deadline.Token);
+        await hub.HandshakeAsync();
+        var response = await hub.SubscribeAsync(room.RoomId);
+        Assert.True(response.TryGetProperty("error", out _));
+        var entry = Assert.Single(logs.Errors);
+        Assert.Equal(6101, entry.Id);
+        Assert.Contains(nameof(FailedRoomState), entry.Text);
+        Assert.DoesNotContain(FailedRoomState.SensitiveMessage, entry.Text);
+        Assert.DoesNotContain(room.Credential, entry.Text);
+        Assert.DoesNotContain(room.Code, entry.Text);
+    }
+
+    [Fact]
     public async Task Subscriptions_AreSameRoomAndReceiveOnlyCommittedVersionHints()
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
@@ -433,6 +455,29 @@ public sealed class RoomHubTests
         }
 
         public Task<int> DeleteBatchAsync(int batchSize, CancellationToken cancellationToken) => Task.FromResult(0);
+    }
+
+    private sealed class FailedRoomState : IRoomStateStore
+    {
+        public const string SensitiveMessage = "raw hub exception content";
+        public Task<RoomState> GetAsync(Guid roomId, Guid participantId, CancellationToken cancellationToken)
+            => throw new InvalidOperationException(SensitiveMessage);
+    }
+
+    private sealed class HubFailureLogs : ILoggerProvider, ILogger
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<(int Id, string Text)> Errors { get; } = new();
+        public ILogger CreateLogger(string categoryName) => this;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Dispose() { }
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Error)
+                Errors.Enqueue((eventId.Id, formatter(state, exception)));
+        }
     }
 
     private sealed class TrackingLogger : ILogger<RoomConnections>

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Pasto.Server.Api;
@@ -8,10 +9,12 @@ using Pasto.Server.Application.Items;
 using Pasto.Server.Application.Rooms;
 using Pasto.Server.Infrastructure.Persistence;
 using Pasto.Server.Infrastructure.Security;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
-// 瀏覽器 SignalR 傳輸會在 query string 放憑證，停用會記錄該字串的框架請求日誌。
-builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Logging.ClearProviders();
+builder.Services.AddSerilog((_, logger) => ServerLogging.Configure(builder.Configuration, builder.Environment, logger),
+    preserveStaticLogger: true, writeToProviders: true);
 // 在 JSON 綁定／字串配置前由 Kestrel 限制實際 body bytes，包含未知長度的串流。
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 32 * 1024);
 
@@ -82,7 +85,8 @@ builder.Services.AddAuthentication(ParticipantAuthenticationHandler.SchemeName)
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ParticipantAuthenticationHandler>(
         ParticipantAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddAuthorization();
-builder.Services.AddSignalR();
+builder.Services.AddSingleton<RoomHubFailureFilter>();
+builder.Services.AddSignalR().AddHubOptions<RoomHub>(options => options.AddFilter<RoomHubFailureFilter>());
 builder.Services.AddSingleton<RoomChangeNotifications>();
 builder.Services.AddOptions<CreateRoomOptions>()
     .Bind(builder.Configuration.GetSection("RoomCreation"))
