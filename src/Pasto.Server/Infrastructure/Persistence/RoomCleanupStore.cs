@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Pasto.Server.Application.Rooms;
@@ -6,6 +7,51 @@ namespace Pasto.Server.Infrastructure.Persistence;
 
 public sealed class RoomCleanupStore(IDbContextFactory<PastoDbContext> contextFactory) : IRoomCleanupStore
 {
+    public async Task<int> ReclaimCodesAsync(int batchSize, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(batchSize, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(batchSize, CleanUpRooms.MaxBatchSize);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        await context.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", cancellationToken);
+        await context.Database.ExecuteSqlRawAsync("SET LOCAL statement_timeout = '5s'", cancellationToken);
+
+        var codes = await context.Database.SqlQuery<string>($"""
+            SELECT reservation.code AS "Value"
+            FROM room_code_reservations AS reservation
+            WHERE reusable_after <= statement_timestamp()
+              AND NOT EXISTS (SELECT 1 FROM rooms WHERE code = reservation.code)
+            ORDER BY reusable_after, code
+            LIMIT {batchSize}
+            FOR UPDATE OF reservation SKIP LOCKED
+            """).ToArrayAsync(cancellationToken);
+        if (codes.Length == 0)
+            return 0;
+
+        // 取得碼的列鎖後，以 READ COMMITTED 的新 statement snapshot 複驗引用及期限。
+        var deleted = await context.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM room_code_reservations AS reservation
+            WHERE reservation.code = ANY({codes})
+              AND reusable_after <= clock_timestamp()
+              AND NOT EXISTS (SELECT 1 FROM rooms WHERE code = reservation.code)
+            """, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return deleted;
+    }
+
+    public async Task<HashSet<Guid>> FindUnavailableRoomsAsync(Guid[] roomIds, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(roomIds.Length, CleanUpRooms.MaxBatchSize);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var unavailable = await context.Database.SqlQuery<Guid>($"""
+            SELECT tracked.id AS "Value"
+            FROM unnest({roomIds}) AS tracked(id)
+            LEFT JOIN rooms AS room ON room.id = tracked.id
+            WHERE room.id IS NULL OR room.deleted_at IS NOT NULL OR room.expires_at <= statement_timestamp()
+            """).ToArrayAsync(cancellationToken);
+        return unavailable.ToHashSet();
+    }
+
     public async Task<RoomCleanupBacklog> MeasureBacklogAsync(CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);

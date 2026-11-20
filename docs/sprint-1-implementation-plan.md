@@ -109,6 +109,13 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 - 20 秒預算用完時，若本輪已成功提交且刪除至少一房，視為正常追趕，連續失敗輪數歸零，記錄 Warning `6006 RoomCleanupRoundIncomplete`，含 `CommittedBatches` 與 `DeletedRooms`。本輪尚未提交任何房間刪除則維持 `6002` 並累加失敗輪數。資料庫錯誤、單房仍逾時及未預期例外即使已有進度也照常計為失敗。
 - 正式主機預設啟用 Worker。整合測試主機預設設 `Cleanup:Enabled=false`，清理測試可直接呼叫批次執行，並以顯式啟用的主機驗證啟動補清。
 
+第二個工作項目（保留碼與連線）：
+
+- 保留碼沿用 `ix_code_reuse`，每批最多 100 筆，依 `ReusableAfter`、房碼順序以 `FOR UPDATE SKIP LOCKED` 選取。READ COMMITTED 交易內取得鎖後，再確認 DB 時間已達期限及無 Room 引用，提交後才算回收。現有 FK 與唯一鍵保護並行建房及回收。
+- 1,500 條上限只限制單實例的訂閱追蹤表。追蹤於加入 group 前登記，失敗或斷線即移除。滿載時仍加入 group 並執行加入後的 DB 複驗，既有未追蹤連線保持原狀，新訂閱可使用釋出的名額。重複訂閱不重複占用或計數。S7 的完整 transport、IP、房間與 Participant 配額另行交付。
+- 關房提交後先盡力送既有 `RoomChanged`，再由 Host 中止同房已追蹤連線。Worker 以 DB 時間每批最多複驗 100 個追蹤中的 RoomId，補清到期、已關與已刪除的房間，下一輪從上次完成的位置接續。Worker 的連線複驗與房碼回收各有 5 秒取消期限，與主資料 20 秒預算及其連續失敗計數獨立。
+- 未追蹤連線由既有 `RoomChanged`、REST 404／401 及 Client 失效流程退出。Worker 每輪只在累計值為正時記錄一次 `6009 RoomConnectionTrackingFull` Warning，帶 `UntrackedSubscriptions` 並取走累計值。欄位不含連線識別與敏感資料。
+
 驗收：
 
 - AC-10～AC-12：Worker 停止不恢復過期存取；主資料 cascade 全清、保留碼仍在；重跑安全、停機恢復可補清。
@@ -189,5 +196,5 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 15. 下一個實作任務與完成回報
 
-S6 第一項已完成。文件批次記錄 [ADR 0004](decisions/0004-observability-and-deployment.md) 與後續各階段驗收。下一項先提出房碼冷卻回收與 SignalR 連線清理方案，依 [TODO.md](../TODO.md) 核對工作狀態。實際測試與失敗紀錄見 [testing.md](testing.md)。
+S6 主資料、房碼冷卻回收與 SignalR 連線清理已實作，第二項待審查。後續階段依 [ADR 0004](decisions/0004-observability-and-deployment.md) 與 [TODO.md](../TODO.md) 接續。實際測試與失敗紀錄見 [testing.md](testing.md)。
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。

@@ -1,6 +1,6 @@
 # Pasto — 開發進度與下一步
 
-更新日期：2026-11-20（Asia/Taipei）。這是目前狀態的入口。開工前先讀 [AGENTS.md](AGENTS.md)，並以實際 Git 狀態核對本檔。詳細設計與驗證紀錄以連結文件為準。
+更新日期：2026-11-21（Asia/Taipei）。這是目前狀態的入口。開工前先讀 [AGENTS.md](AGENTS.md)，並以實際 Git 狀態核對本檔。詳細設計與驗證紀錄以連結文件為準。
 
 ## 目前位置
 
@@ -43,10 +43,11 @@
 - [x] S5 獨立審查，審查方回報無阻擋問題。跨午夜標籤 P3 已修正，平滑捲動中斷已補 Edge 測試。 [審查交接與結果](docs/s5-review.md)
 - [x] S5 合併。[PR #8](https://github.com/ARueiz/Pasto/pull/8) 已合併至 `main@98424e6`。
 - [x] 依 AGENTS.md §10 更新 README 與 TODO，記錄合併 PR、S5 交付及 S6。
-- [ ] S6：到期／關房資料清理。
+- [x] S6：到期／關房資料清理。
   - [x] 主資料清理實作與專項驗證。分批實體刪除失效房間，跳過鎖定房間並保留房碼。批次逾時時減半，最小到 1，滿批成功後逐步恢復。Worker 記錄連續失敗輪數並繼續下一輪。
   - [x] 收尾 P3 修正。整輪預算用完時若已有房間刪除成功提交，記錄 `6006`、歸零連續失敗輪數；無進度仍記錄 `6002` 並累加。
-  - [ ] 房碼保留紀錄回收與 SignalR 連線清理。
+  - [x] 房碼保留紀錄回收與 SignalR 連線清理已完成審查，無阻擋問題。
+  - [x] 第二項 P2。追蹤滿載時允許訂閱，Worker 彙總 `6009`。
 - [ ] Logging：結構化日誌與 Hub 例外。
 - [ ] Health Checks：存活、DB 就緒與 Worker 狀態。
 - [ ] OpenTelemetry：指標、Tracing 與選配 OTLP。
@@ -56,6 +57,10 @@
 - [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
 ## 最新驗證
+
+S6 第二項 P2 的 Release Build、格式檢查、PostgreSQL／SignalR 專項 27 例與完整回歸 307 例通過。 [測試紀錄](docs/testing.md#s6-訂閱追蹤滿載-p22026-11-21)
+
+S6 第二項的 Release Build、格式檢查與完整 PostgreSQL／SignalR 回歸 305 例通過。 [測試紀錄](docs/testing.md#s6-房碼回收與-signalr-連線清理2026-11-20)
 
 S6 整輪預算 P3 修正的 Release Build、格式檢查、真 PostgreSQL 專項 12 例及完整回歸 296 例通過。 [測試紀錄](docs/testing.md#s6-整輪預算-p3-驗證2026-11-20)
 
@@ -100,14 +105,15 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-2026-11-20，S6 第一項已在 `feature/s6-room-cleanup` 提交至 `8e3d1bf`，可觀測性與部署文件已更新。下一個 S6 工作項目先提出房碼保留紀錄回收與 SignalR 連線清理方案。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md)
+S6 第二項審查無阻擋問題。完成 S6 後先收尾文件批次 `f3e5352` 的審查修正，再提出 Logging 階段的 Serilog 導入方案。S6 合併至 `main` 後依 AGENTS.md §10 更新 README 進度表。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
 ## 後續必須保留的事項
 
-- S6：由 Worker 接續處理到期與關房後的連線清理。S5 的訂閱複驗與 REST 請求已拒絕失效房間。
-- S7：驗證 Hub 協商與連線配額、日誌中的 token 遮蔽與正式反向代理。
+- S6 第二項非阻擋 P3：`6009 RoomConnectionTrackingFull` 目前隨清理 Worker 彙總。停用 Worker 時沒有摘要。後續確認是否需要與 Worker 狀態獨立的有界摘要，保留每期間最多一筆的日誌節流。
+
+- S7：交付並驗證全站 SignalR 連線配額、每個 Participant 3 條連線，以及 Hub 協商防護、日誌 token 遮蔽與正式反向代理。S6 的 1,500 條上限只限制追蹤表記憶體，滿載仍可訂閱，不能取代 S7 的連線配額。
 - 後續可評估作者代碼撞碼處理。目前接受五碼相同的作者在連續顯示時可能被分在同組。
 - S7：少數來源可耗盡共用的驗證前 read admission，影響讀取，也會阻擋新增文字、刪除文字與關房。Participant 寫入配額不會緩解此入口風險。
 - S7：持有分享連結者可反覆 Join 耗盡 1,000 個生命週期 Participant 名額。

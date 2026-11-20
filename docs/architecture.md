@@ -181,7 +181,9 @@ Hub 無法使用時，Client 仍以 REST 載入及手動更新快照，並以同
 
 401／RoomUnavailable 是該身分／UUID 的終止狀態：增加 generation、清文字／該房 Credential、停工作與連線，不自動 Join 同 Code。到期倒數可用 expiresAt／serverTime 校準，但 DB 判定才是權威。已顯示文字仍可複製，背景節流／離線不保證修復時限。
 
-host 維持有界 connectionId／RoomId／Participant／到期追蹤。關房 commit 後盡力提示並清 group／中止連線，到期亦清線；group 並非授權。清線通知可能延遲，所有 REST 與 Hub invocation 仍重驗，沒有正文推播。DB commit 後程序中斷仍可能漏通知，靠上述 REST 校正；無持久回放、Outbox、Message Queue 或 exactly-once。
+Host 有界追蹤已驗證訂閱的 connectionId、RoomId 與中止連線的回呼，Participant 身分由 Hub 既有驗證流程取得，期限由 Worker 分批依 DB 時間複驗。關房 commit 後盡力提示並中止同房連線，SignalR 斷線時移除群組成員。Worker 補清到期、已關與已刪除房間的連線。清線可能延遲，REST 與 Hub invocation 仍各自重驗。通知仍可能遺漏，由 REST 校正；沒有正文推播、持久回放、Outbox、Message Queue 或 exactly-once。
+
+1,500 條上限只限制 Host 的追蹤表記憶體。滿載時仍加入群組並做加入後的 DB 複驗。完成訂閱後只在該連線生命週期記住未追蹤狀態，名額釋出後由新訂閱使用，既有未追蹤連線不補登。關房及 Worker 只中止已追蹤連線。未追蹤連線仍會收到既有提示，並透過 REST 404 或主資料已移除後的 401、前景輪詢及 Client 失效流程停止連線。Worker 每輪最多記錄一次 `6009 RoomConnectionTrackingFull` Warning，摘要為期間內成功但未追蹤的訂閱數 `UntrackedSubscriptions`，停用 Worker 時不輸出這項摘要。S7 的全站／Participant 等連線配額另行交付。
 
 ## 7. 冷卻、失效與清理
 

@@ -1,5 +1,19 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S6 訂閱追蹤滿載 P2（2026-11-21）
+
+- Release Build 與格式檢查第一次因測試寫法觸發 xUnit2031，改用 `Assert.Single` 的 predicate overload，維持斷言。重跑 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~RoomCodeCleanupTests|FullyQualifiedName~RoomHubTests|FullyQualifiedName~RoomCleanupTests"` 在 Docker Compose PostgreSQL 上 27 例通過，0 失敗、0 略過。容量設為 1 時，兩條未追蹤連線仍成功訂閱並收到更新及關房提示，重新訂閱已關房時收到 `RoomUnavailable`。已有未追蹤連線不補登，釋出名額後新連線可登記。Worker 只記一筆 `6009`，`UntrackedSubscriptions` 為 2，累計值取走後無重複摘要。並行登記、已取消連線、異房登記與移除不存在紀錄亦有斷言。原有 25 例測試與斷言保留。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-p2-focused.trx`。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 完整 PostgreSQL 回歸 307 通過、0 失敗、0 略過，耗時 1 分 20 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-p2-full.trx`。
+
+## S6 房碼回收與 SignalR 連線清理（2026-11-20）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 通過，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 真 PostgreSQL 驗證提前關房保留原冷卻期限、期限已到但仍有 Room 引用時保留、跳鎖後取滿 100 筆、啟動跨批補清及重跑。並行測試透過 `pg_blocking_pids` 證明建房等待回收交易。回收提交後可重配相同碼，舊 Credential 對新房回 401，新 Credential 回 200；回收回滾則舊碼仍被保留。
+- SignalR 使用測試 Host 的 WebSocket 與真 PostgreSQL，驗證提前關房、重複訂閱、關房與第二次訂閱檢查的競爭、通知故障、Worker 補清到期／已關／已刪房、他房仍可接收提示，以及 Worker 停用時的已關房 REST 和新訂閱拒絕。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~RoomCodeCleanupTests|FullyQualifiedName~RoomHubTests|FullyQualifiedName~RoomCleanupTests"` 通過 25 例、0 失敗、0 略過。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-focused.trx`。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 完整回歸 305 通過、0 失敗、0 略過，耗時 1 分 21 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-full.trx`。1,500 條追蹤的高負載行為及重房積壓清理時限仍待壓測。
+
 ## S6 整輪預算 P3 驗證（2026-11-20）
 
 - `dotnet build Pasto.slnx -c Release --no-restore` 通過，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。

@@ -41,7 +41,7 @@ builder.Services.AddKeyedSingleton<NpgsqlDataSource>("RoomCleanup", (services, _
     var settings = services.GetRequiredService<IOptions<RoomCleanupOptions>>().Value;
     return CreateDataSource(connectionString, settings.MaxPoolSize);
 });
-builder.Services.AddSingleton<IRoomCleanupStore>(services =>
+builder.Services.AddSingleton(services =>
 {
     var options = new DbContextOptionsBuilder<PastoDbContext>()
         .UseNpgsql(services.GetRequiredKeyedService<NpgsqlDataSource>("RoomCleanup"),
@@ -49,7 +49,9 @@ builder.Services.AddSingleton<IRoomCleanupStore>(services =>
         .Options;
     return new RoomCleanupStore(new PooledDbContextFactory<PastoDbContext>(options, poolSize: 1));
 });
+builder.Services.AddSingleton<IRoomCleanupStore>(services => services.GetRequiredService<RoomCleanupStore>());
 builder.Services.AddSingleton<CleanUpRooms>();
+builder.Services.AddSingleton<RoomConnections>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<RoomCleanupWorker>();
 builder.Services.AddOptions<ApiOptions>().BindConfiguration("Api")
