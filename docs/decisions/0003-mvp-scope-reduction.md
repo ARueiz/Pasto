@@ -2,6 +2,7 @@
 
 - 狀態：Accepted
 - 日期：2026-11-05
+- 部署範圍的限制已由 [ADR 0004](0004-observability-and-deployment.md#部署政策) 修訂。
 - 修訂：[ADR 0002](0002-room-code-and-anonymous-participants.md) 中的分頁協定與分層限流的 MVP 範圍；其餘決策不變
 - 現行規格：[requirements.md](../requirements.md)、[architecture.md](../architecture.md)、[Sprint 1 實作計畫](../sprint-1-implementation-plan.md)
 

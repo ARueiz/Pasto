@@ -10,6 +10,8 @@ Pasto 以自架 Docker Compose 為主要部署形式。AWS 是正式環境的部
 
 **任何不受信任的裝置或使用者能夠連線的環境，都視為公開部署。** 內網有訪客 Wi-Fi、BYOD 或其他不受信任的來源可存取時，也適用公開部署規則。內網自架仍須保留驗證、限流與敏感資料保護。**S7 防護完成前不得公開部署。**
 
+本 ADR 修訂 [ADR 0003](0003-mvp-scope-reduction.md)「補齊 S7 前只在本機或隔離環境使用」的部署範圍。S7 完成前可以在只有可信任裝置與使用者能存取的內網使用，公開部署仍禁止。
+
 ## 選擇與取捨
 
 | 主題 | 決策 | 替代方案與取捨 |
@@ -21,11 +23,12 @@ Pasto 以自架 Docker Compose 為主要部署形式。AWS 是正式環境的部
 | 應用程式日誌 | 保留 `ILogger<T>`，以 Serilog 輸出 Console。Docker driver 負責輪替。 | 內建 Console 相依較少。Serilog 提供一致結構與選配 sink，但需重新驗證框架日誌過濾及測試 provider。應用程式的檔案輸出會增加路徑權限和輪替責任。 |
 | 健康狀態 | ASP.NET Core Health Checks 分開回報存活與 DB 就緒，清理 Worker 狀態另外回報。 | 單一檢查實作較少，但 DB 或 Worker 故障會混淆探針用途。分開後需配置內部路由與探針。 |
 | Metrics 與 Traces | OpenTelemetry 採內建 meter 優先，OTLP 匯出依設定啟用；日誌繼續由 Serilog 處理。 | 廠商專用 SDK 或自訂全部指標會增加耦合及重複計數風險。OTel 仍需管理採樣、欄位遮蔽及接收端。 |
+| 量測工具 | `dotnet-counters` 即時讀取執行中程序的內建與自訂 meter。獨立的 .NET Aspire Dashboard 容器接收 OTLP，供查看 trace、日誌及指標。兩者用於開發與 S8 隔離測試。Dashboard 選用固定版本的官方映像，發布的連接埠只綁 `127.0.0.1`，保留內建存取驗證，資料僅在記憶體且無須持久化。標準 `deploy/` 啟動不包含 Dashboard。Compose 放置方式與是否將 `dotnet-counters` 加入 `dotnet-tools.json`，到 S8 開工時另提方案。 | Prometheus＋Grafana 適合持續觀測，提前導入 Seq 可集中查詢日誌，兩者都會增加營運設定。選用即時工具與獨立 Dashboard 可省去常駐基礎設施。Dashboard 資料重啟即消失，僅適合短期查驗。 |
 | 選配收集 | 自架可選 Seq；AWS 由基礎設施將 stdout／stderr 收到 CloudWatch。 | 將 Seq 或 CloudWatch SDK 設成必備會提高部署門檻。選配可維持單純的 Console 路徑，保留期限及警報由各環境管理。 |
 
 ## 安全界線
 
-六碼房碼、Credential、使用者文字、Authorization、Cookie 及資料庫密碼須保護。RoomId 為無授權能力的內部 UUID，可用於日誌關聯。所有收集層都須驗證 URL 與診斷欄位已去除房碼與 `access_token`，低基數路由模板可保留。例外記錄沿用型別與堆疊框架等受控欄位。
+六碼房碼、Credential、使用者文字、Authorization、Cookie 及資料庫密碼須保護。RoomId 為無授權能力的內部 UUID，可用於日誌關聯。所有收集層都須驗證 URL 與診斷欄位已去除房碼與 `access_token`，低基數路由模板可保留。例外記錄沿用型別與堆疊框架等受控欄位。送入 Aspire Dashboard 的 trace 與日誌也須遮蔽房碼、`access_token`、Credential 與使用者文字，並在 OpenTelemetry 階段檢查實際收到的資料。
 
 ## 階段依賴
 

@@ -17,6 +17,7 @@
 | S5 合併 | [PR #8](https://github.com/ARueiz/Pasto/pull/8) 已於 2026-11-20 合併至 `main@98424e6`（Asia/Taipei） |
 | S6 工作分支 | `feature/s6-room-cleanup`，由包含 S5 合併與交付紀錄的本機 `main` 建立 |
 | S6 第一項提交 | `8e3d1bf`，主資料清理、Worker 收尾及 P3，審查無阻擋問題 |
+| S6 第二項提交 | `a394f3c`，房碼回收、SignalR 連線清理及追蹤滿載 P2，審查無阻擋問題 |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -105,7 +106,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S6 第二項審查無阻擋問題。完成 S6 後先收尾文件批次 `f3e5352` 的審查修正，再提出 Logging 階段的 Serilog 導入方案。S6 合併至 `main` 後依 AGENTS.md §10 更新 README 進度表。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md)
+S6 已在 `feature/s6-room-cleanup` 完成，文件批次 `f3e5352` 的審查修正已補齊。下一階段先確認 Logging 的 Serilog 導入方案。S6 合併至 `main` 後依 AGENTS.md §10 更新 README 進度表。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#8-logging)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 

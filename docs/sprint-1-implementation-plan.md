@@ -12,7 +12,7 @@
 
 OpenTelemetry 先提供 S8 所需的指標。S7 先處理讀取 admission 耗盡、反覆 Join 耗盡名額等風險。Deployment 之後再以近正式的容器環境壓測。公開部署的判定及部署取捨見 [ADR 0004](decisions/0004-observability-and-deployment.md)。
 
-S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用。S2 開始已有基本輸入、Credential 脫敏與 ADR 0003 的基本限流；S7 補齊其餘分層防護並做完整安全／資源驗證。S7 完成前只在隔離本機環境驗證，不發布公開站台。
+S1 是資料庫設計的驗證關卡，不能跳過後直接生成完整應用。S2 開始已有基本輸入、Credential 脫敏與 ADR 0003 的基本限流；S7 補齊其餘分層防護並做完整安全／資源驗證。S7 完成前可以在只有可信任裝置與使用者能存取的內網使用，並保留驗證、限流與敏感資料保護。只要有不受信任的來源能連線，就視為公開部署，S7 完成前禁止。
 
 S1-01 依核准建立最小必要測試專案與相依，沿用既有 DB；不預先建立大量空專案。後續若需要改已核定不變條件或增加 MVP 外需求，先提出影響與修訂，不自行擴張。
 
@@ -134,14 +134,16 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 
 - `/health/live` 僅檢查程序。 `/health/ready` 以既有 API `NpgsqlDataSource` 執行有界的低成本查詢，如 `SELECT 1`。使用 ASP.NET Core 內建功能。
 - 另提清理 Worker 狀態的呈現方式，回報最後成功時間及連續失敗輪數。Worker 故障與追趕進度均不改變 live／ready 結果。端點略過現有限流與驗證，回應不含敏感資料或內部細節，成功探針不寫 Information。部署時只在內部開放。
-- 驗收涵蓋 DB 不可達時 live 正常、ready 失敗，Worker 失敗時兩種探針結果依原條件判定，以及代理外部無法存取健康端點。
+- 驗收涵蓋 DB 不可達時 live 正常、ready 失敗，Worker 失敗時兩種探針結果依原條件判定。
+- 外部流量無法存取 `/health/*` 的驗收列在 [Deployment](#12-deployment) 的可信代理項目。
 
 ## 10. OpenTelemetry
 
 - 開工前提 Hosting 擴充、ASP.NET Core instrumentation 與 OTLP exporter 方案。有 OTLP 端點才註冊 exporter，無設定時仍正常運作。日誌維持 Serilog。
 - HTTP 數量、錯誤率、耗時與 SignalR 連線優先訂閱 .NET 內建 meter。用 `System.Diagnostics.Metrics` 增加清理失敗及 Item 新增失敗計數。RoomId、ItemId、TraceId、ParticipantId、ConnectionId 與房碼禁止用作 metric tag。
 - Tracing 從 ASP.NET Core 起步，採 W3C Trace Context，正式環境採樣可調。EF Core／Npgsql tracing 另確認需求與重複 span。文件說明 negotiate、WebSocket handshake 與 Hub 方法各自的 trace 範圍，依所選版本驗證。
-- 驗收檢查實際輸出的 `url.path`、`url.query`、`url.full` 等屬性及 SignalR 相關 span，確保無 `access_token` 與實際房碼。核對套件版本的 query 遮蔽，並驗證明確的匯出前清理；metrics 的 `http.route` 使用路由模板。S8 前確認隔離環境有可接收和查詢 OTLP 的接收端。
+- 驗收檢查實際輸出的 `url.path`、`url.query`、`url.full` 等屬性及 SignalR 相關 span，確保無 `access_token` 與實際房碼。核對套件版本的 query 遮蔽，並驗證明確的匯出前清理；metrics 的 `http.route` 使用路由模板。本機驗收須把指標和 trace 實際送到獨立容器的 .NET Aspire Dashboard 並查看，核對 Dashboard 實際接收的 trace 與日誌符合跨階段遮蔽要求，沒有房碼、`access_token`、Credential 或使用者文字。用 `dotnet-counters` 驗證可即時讀取執行中程序的內建 meter 和自訂 meter。日誌收集依既有選型，產品仍由 Serilog 輸出。
+- `dotnet-counters` 與 Aspire Dashboard 只用於開發及 S8 隔離測試。Dashboard 使用固定版本的官方映像，發布的連接埠只綁 `127.0.0.1`，保留內建存取驗證，資料只在記憶體，不需持久化。標準 `deploy/` 啟動不包含 Dashboard。
 
 ## 11. S7：安全、資源與監控整合
 
@@ -164,8 +166,8 @@ S7 完成後交付。代理與瀏覽器驗收可先使用隔離容器環境。�
 | 工作 | 交付與驗收 |
 | --- | --- |
 | 同源靜態檔 | ASP.NET Core 提供 Vite 建置檔，開發維持 Vite。`ApiFailureMiddleware` 的 `no-store` 限定 API、Hub 等敏感回應。`index.html` 使用 `no-cache`，帶內容 hash 的資產長期快取。驗證刷新 `/r/{code}`、SPA fallback 排除 `/api`、`/hubs`、`/health` 及遺失靜態檔；測試 CSP、`Referrer-Policy: no-referrer`、HSTS、`X-Content-Type-Options: nosniff` 及 WSS。 |
-| Caddy／TLS | 內網用 Internal CA 或自備憑證，AWS 用公開信任憑證，localhost 開發可用 HTTP。初始化設定主機名稱／IP 與 SAN，持久化 CA 及 Caddy 資料。提供電腦、iOS、Android 的根憑證信任步驟，實機驗證 Clipboard API。Caddy 與應用程式解耦。驗收 access log 及錯誤路徑已遮蔽 URL 房碼、`access_token` 等敏感資料。 |
-| 可信代理 | 在既有可信 IP 外支援明確 CIDR allowlist，固定 Compose 代理子網範圍，API host port 維持不發布。驗收偽造 X-Forwarded-For／Proto 與來源 IP、HTTPS scheme、SignalR Origin 及限流所用的真實 Client IP；`/health/*` 只對內。 |
+| Caddy／TLS | 內網用 Internal CA 或自備憑證，AWS 用公開信任憑證，localhost 開發可用 HTTP。初始化設定主機名稱／IP 與 SAN，持久化 CA 及 Caddy 資料。提供電腦、iOS、Android 的根憑證信任步驟，實機驗證裝置確實信任憑證且 Clipboard API 可用。所有說明文件與初始化流程不得要求使用者忽略憑證錯誤或略過警告。Caddy 與應用程式解耦。驗收 access log 及錯誤路徑已遮蔽 URL 房碼、`access_token` 等敏感資料。 |
+| 可信代理 | 在既有可信 IP 外支援明確 CIDR allowlist，固定 Compose 代理子網範圍，API host port 維持不發布。只信任 Compose 固定的代理子網段或使用者明確設定的 CIDR。不得自動信任所有私有網段，例如 `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`。驗收私有網段內其他來源偽造的 `X-Forwarded-*` 不會被採用，並核對 HTTPS scheme、SignalR Origin、限流所用的真實 Client IP，以及代理外部無法存取 `/health/*`。 |
 | Migration 與啟動 | 獨立一次性 Job，DB 未就緒時有限等待；Job 失敗不得啟動不相容 API。API 啟動時以 DML 帳號唯讀檢查 schema／遷移歷史，確認不相容記 Critical 並以非零碼退出；短暫無法連線先有限重試。開工時定義高於應用版本的 schema 處置。確認已遷移、未遷移、暫時不可達、測試隔離 schema，以及 EF Core 10／現行 Npgsql 的並行 migration lock 行為。DDL 帳號與 API 帳號最小權限分離，readiness 只做低成本 DB 探針。 |
 | Compose | 正式設定放 `deploy/`，根目錄測試用 `compose.yaml` 保留。初始化用 `.env.example` 說明密碼、主機、TLS、持久化設定，未提供必要設定須拒絕啟動。初始化後支援 `docker compose up -d`。服務使用 stdout／stderr 與有界輪替，例如 `local` driver 的 `max-size: 10m`、`max-file: 5`，驗證目標 Docker／NAS 相容性並提供替代 driver。日誌與 DB 資料各有保存期限。 |
 
@@ -174,6 +176,8 @@ CSP 初稿為 `default-src 'self'; script-src 'self'; style-src 'self'; img-src 
 ## 13. S8：負載證據、驗收與文件收尾
 
 交付可重跑負載情境／版本與硬體設定、結果報告、查詢計畫／主要瓶頸、最終候選設定調整與已知限制；補齊操作／本機啟動及測試說明。使用既定單實例，不因測試數字就新增 Redis 等基礎設施。
+
+在隔離的近正式容器環境使用 `dotnet-counters` 即時觀察內建與自訂 meter，並以獨立的 .NET Aspire Dashboard 容器接收 OTLP，查看 trace、日誌及指標。沿用 §10 的官方映像版本固定、loopback 綁定、存取驗證及資料遮蔽。Dashboard 資料只在記憶體，須於停止容器前整理驗收證據。Dashboard 放置方式（獨立 Compose 檔或 profile 等）及是否將 `dotnet-counters` 加入 `dotnet-tools.json`，到 S8 開工時另提方案。
 
 驗收情境：
 
@@ -196,5 +200,5 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 15. 下一個實作任務與完成回報
 
-S6 主資料、房碼冷卻回收與 SignalR 連線清理已實作，第二項待審查。後續階段依 [ADR 0004](decisions/0004-observability-and-deployment.md) 與 [TODO.md](../TODO.md) 接續。實際測試與失敗紀錄見 [testing.md](testing.md)。
+S6 主資料、房碼冷卻回收與 SignalR 連線清理已完成審查並提交至工作分支。下一步先完成 Logging 階段方案確認。後續階段依 [ADR 0004](decisions/0004-observability-and-deployment.md) 與 [TODO.md](../TODO.md) 接續。實際測試與失敗紀錄見 [testing.md](testing.md)。
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。
