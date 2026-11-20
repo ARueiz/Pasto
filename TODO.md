@@ -49,15 +49,17 @@
   - [x] 收尾 P3 修正。整輪預算用完時若已有房間刪除成功提交，記錄 `6006`、歸零連續失敗輪數；無進度仍記錄 `6002` 並累加。
   - [x] 房碼保留紀錄回收與 SignalR 連線清理已完成審查，無阻擋問題。
   - [x] 第二項 P2。追蹤滿載時允許訂閱，Worker 彙總 `6009`。
-- [ ] Logging：結構化日誌與 Hub 例外。
-- [ ] Health Checks：存活、DB 就緒與 Worker 狀態。
-- [ ] OpenTelemetry：指標、Tracing 與選配 OTLP。
+- [x] Logging：結構化日誌與 Hub 例外。
+- [x] Health Checks：存活、DB 就緒與 Worker 狀態。
+- [x] OpenTelemetry：指標、Tracing 與選配 OTLP。
 - [ ] S7：防護、資源與濫用處理。
 - [ ] Deployment：同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose。
 - [ ] S8：壓測與收尾。
 - [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
 ## 最新驗證
+
+Logging、Health Checks 與 OpenTelemetry 已在 `feature/observability` 驗證。完整 PostgreSQL 回歸 313 例通過；另驗證獨立 Aspire Dashboard 回讀 OTLP 及 `dotnet-counters` 即時指標。 [測試紀錄](docs/testing.md#logginghealth-checks-與-opentelemetry2026-11-21)
 
 S6 第二項 P2 的 Release Build、格式檢查、PostgreSQL／SignalR 專項 27 例與完整回歸 307 例通過。 [測試紀錄](docs/testing.md#s6-訂閱追蹤滿載-p22026-11-21)
 
@@ -106,7 +108,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S6 已在 `feature/s6-room-cleanup` 完成，文件批次 `f3e5352` 的審查修正已補齊。下一階段先確認 Logging 的 Serilog 導入方案。S6 合併至 `main` 後依 AGENTS.md §10 更新 README 進度表。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#8-logging)
+S6 已在 `feature/s6-room-cleanup` 完成，文件批次 `f3e5352` 的審查修正已補齊。Logging、Health Checks 與 OpenTelemetry 已在 `feature/observability` 驗證，下一階段為 S7 防護。各階段合併至 `main` 後依 AGENTS.md §10 更新 README 進度表。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#11-s7安全資源與監控整合)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 

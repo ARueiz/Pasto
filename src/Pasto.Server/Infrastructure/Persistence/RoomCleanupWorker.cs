@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Pasto.Server.Application.Rooms;
+using Pasto.Server.Observability;
 
 namespace Pasto.Server.Infrastructure.Persistence;
 
@@ -17,6 +18,7 @@ internal sealed class RoomCleanupWorker(
     RoomCleanupStore store,
     RoomConnections connections,
     RoomCleanupStatus status,
+    ServerMetrics metrics,
     IStorageFailureClassifier storageFailures,
     TimeProvider timeProvider,
     ILogger<RoomCleanupWorker> logger) : BackgroundService
@@ -60,24 +62,24 @@ internal sealed class RoomCleanupWorker(
             catch (OperationCanceledException) when (budget.IsCancellationRequested)
             {
                 logger.LogWarning(RoundTimedOut, "Room cleanup reached the round time budget. Consecutive failures: {ConsecutiveFailures}",
-                    status.RecordFailure());
+                    RecordFailure());
             }
             catch (RoomCleanupBatchTimeoutException)
             {
                 logger.LogWarning(SingleRoomTimedOut, "Room cleanup timed out at batch size {BatchSize}. Consecutive failures: {ConsecutiveFailures}",
-                    1, status.RecordFailure());
+                    1, RecordFailure());
             }
             catch (Exception exception) when (storageFailures.IsStorageFailure(exception))
             {
                 var postgres = exception as PostgresException ?? exception.GetBaseException() as PostgresException;
                 logger.LogWarning(DatabaseFailure,
                     "Room cleanup database operation failed ({ErrorType}, SQLSTATE {SqlState}). Consecutive failures: {ConsecutiveFailures}",
-                    exception.GetType().Name, postgres?.SqlState, status.RecordFailure());
+                    exception.GetType().Name, postgres?.SqlState, RecordFailure());
             }
             catch (Exception exception)
             {
                 logger.LogError(UnexpectedFailure, "Room cleanup failed ({ErrorType}). Consecutive failures: {ConsecutiveFailures}. Frames: {StackFrames}",
-                    exception.GetType().Name, status.RecordFailure(), new StackTrace(exception, false).ToString());
+                    exception.GetType().Name, RecordFailure(), new StackTrace(exception, false).ToString());
             }
 
             await RunMaintenanceAsync(CleanUpConnectionsAsync, ConnectionCleanupDelayed, stoppingToken);
@@ -85,6 +87,12 @@ internal sealed class RoomCleanupWorker(
             connections.ReportUntrackedSubscriptions();
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    private int RecordFailure()
+    {
+        metrics.CleanupFailed();
+        return status.RecordFailure();
     }
 
     private async Task RunMaintenanceAsync(Func<CancellationToken, Task> run, EventId failure, CancellationToken stoppingToken)
@@ -104,6 +112,7 @@ internal sealed class RoomCleanupWorker(
         }
         catch (Exception exception)
         {
+            metrics.CleanupFailed();
             logger.LogWarning(failure, "Room lifecycle maintenance will resume next round ({ErrorType})", exception.GetType().Name);
         }
     }

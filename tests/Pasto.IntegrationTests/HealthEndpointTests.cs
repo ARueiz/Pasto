@@ -16,8 +16,11 @@ public sealed class HealthEndpointTests
     {
         var connection = new NpgsqlConnectionStringBuilder
         {
-            Host = "127.0.0.1", Port = 1, Database = "pasto_test",
-            Username = "diagnostic-test", Password = "health-secret"
+            Host = "127.0.0.1",
+            Port = 1,
+            Database = "pasto_test",
+            Username = "diagnostic-test",
+            Password = "health-secret"
         };
         await using var factory = new PastoApiFactory(connection.ConnectionString);
         using var client = factory.CreateClient();

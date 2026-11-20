@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Pasto.Server.Application.Items;
+using Pasto.Server.Observability;
 
 namespace Pasto.Server.Api;
 
@@ -37,10 +38,20 @@ internal static class ItemEndpoints
         }).WithName(SnapshotName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
 
         app.MapPost("/api/rooms/{roomId:guid}/items", async (Guid roomId, AddItemRequest request,
-            HttpContext context, AddItem add, RoomChangeNotifications notifications, CancellationToken cancellationToken) =>
+            HttpContext context, AddItem add, RoomChangeNotifications notifications, ServerMetrics metrics,
+            CancellationToken cancellationToken) =>
         {
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
-            var result = await add.ExecuteAsync(roomId, identity.ParticipantId, request.Content!, cancellationToken);
+            AddedItem result;
+            try
+            {
+                result = await add.ExecuteAsync(roomId, identity.ParticipantId, request.Content!, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                metrics.ItemAddFailed();
+                throw;
+            }
             await notifications.PublishAsync(roomId, result.CommittedVersion);
             return Results.Json(new
             {

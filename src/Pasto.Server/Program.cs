@@ -9,12 +9,14 @@ using Pasto.Server.Application.Items;
 using Pasto.Server.Application.Rooms;
 using Pasto.Server.Infrastructure.Persistence;
 using Pasto.Server.Infrastructure.Security;
+using Pasto.Server.Observability;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Services.AddSerilog((_, logger) => ServerLogging.Configure(builder.Configuration, builder.Environment, logger),
     preserveStaticLogger: true, writeToProviders: true);
+builder.AddPastoTelemetry();
 // 在 JSON 綁定／字串配置前由 Kestrel 限制實際 body bytes，包含未知長度的串流。
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 32 * 1024);
 

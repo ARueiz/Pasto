@@ -1,5 +1,14 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## Logging、Health Checks 與 OpenTelemetry（2026-11-21）
+
+- Release Build 0 警告、0 錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。Health 測試初始化器首次格式檢查未通過，修正換行後重跑通過。
+- Logging 專項 63 例、Health Checks 專項 14 例通過。驗證正式 Console JSON 的固定 EventId／W3C 關聯與單次輸出、測試 provider 收到安全的應用程式事件、Hub 未預期例外不輸出原始例外、DB 不可達只影響 readiness，以及 Worker 的狀態獨立回報。
+- OpenTelemetry 專項 2 例通過。實際 HTTP span 匯出測試保留路由樣板，去除原始 URL、headers、trace state 等資料。以 MeterListener 驗證文字新增與清理失敗計數沒有 tags。最終 `dotnet test Pasto.slnx -c Release --no-build --no-restore` 完整 PostgreSQL 回歸 313 通過、0 失敗、0 略過，耗時 1 分 21 秒。TRX 為 `observability-full.trx`。
+- 以獨立 `mcr.microsoft.com/aspire/dashboard:13.6.5`、loopback 連接埠、前端／OTLP／查詢驗證及記憶體儲存進行本機 smoke test。以 Dashboard 查詢 API 確認 `Pasto.Server` 有接收 metrics 與 HTTP span，協商 span 保留 `/hubs/room/negotiate`，輸出無測試用房碼、`access_token` 或 URL attributes。此階段收 HTTP negotiate 與握手的 span，Hub 方法 ActivitySource 尚未納入。
+- Serilog 仍輸出 Console。驗證時以暫存的 OTLP Protobuf 測試轉送程式，將實際的安全 `6003` Console 事件送入 Dashboard 並讀回，確認測試用敏感文字未出現。首次手動 JSON 轉送未收到確定回應，改用 Protobuf 確認。本次未加入產品日誌 exporter。
+- 暫存版 `dotnet-counters` 10.0.750501 對執行中的 Kestrel 讀得 `http.server.request.duration` 及 `pasto.cleanup.failures`。首次取樣只捕捉自訂指標，於訂閱開始後補發實際請求，第二次取樣成功取得內建 HTTP 指標。專案工具清單與部署 Compose 維持原樣。
+
 ## S6 訂閱追蹤滿載 P2（2026-11-21）
 
 - Release Build 與格式檢查第一次因測試寫法觸發 xUnit2031，改用 `Assert.Single` 的 predicate overload，維持斷言。重跑 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。

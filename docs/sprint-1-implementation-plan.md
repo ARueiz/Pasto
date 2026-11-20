@@ -133,6 +133,7 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 ## 9. Health Checks
 
 - `/health/live` 僅檢查程序。 `/health/ready` 以既有 API `NpgsqlDataSource` 執行有界的低成本查詢，如 `SELECT 1`。使用 ASP.NET Core 內建功能。
+- `/health/cleanup` 回報 Worker 是否啟用、最後成功時間與連續失敗輪數。已提交進度的預算耗盡仍視為成功，與 S6 的失敗輪數規則一致。
 - 另提清理 Worker 狀態的呈現方式，回報最後成功時間及連續失敗輪數。Worker 故障與追趕進度均不改變 live／ready 結果。端點略過現有限流與驗證，回應不含敏感資料或內部細節，成功探針不寫 Information。部署時只在內部開放。
 - 驗收涵蓋 DB 不可達時 live 正常、ready 失敗，Worker 失敗時兩種探針結果依原條件判定。
 - 外部流量無法存取 `/health/*` 的驗收列在 [Deployment](#12-deployment) 的可信代理項目。
@@ -200,5 +201,5 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 15. 下一個實作任務與完成回報
 
-S6 主資料、房碼冷卻回收與 SignalR 連線清理已完成審查並提交至工作分支。下一步先完成 Logging 階段方案確認。後續階段依 [ADR 0004](decisions/0004-observability-and-deployment.md) 與 [TODO.md](../TODO.md) 接續。實際測試與失敗紀錄見 [testing.md](testing.md)。
+S6 主資料、房碼冷卻回收與 SignalR 連線清理已完成審查並提交至工作分支。Logging、Health Checks 與 OpenTelemetry 已在 `feature/observability` 驗證，後續依 [TODO.md](../TODO.md) 進入 S7。實際測試與失敗紀錄見 [testing.md](testing.md)。
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。
