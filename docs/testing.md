@@ -1,5 +1,39 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S6 訂閱追蹤滿載 P2（2026-11-21）
+
+- Release Build 與格式檢查第一次因測試寫法觸發 xUnit2031，改用 `Assert.Single` 的 predicate overload，維持斷言。重跑 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~RoomCodeCleanupTests|FullyQualifiedName~RoomHubTests|FullyQualifiedName~RoomCleanupTests"` 在 Docker Compose PostgreSQL 上 27 例通過，0 失敗、0 略過。容量設為 1 時，兩條未追蹤連線仍成功訂閱並收到更新及關房提示，重新訂閱已關房時收到 `RoomUnavailable`。已有未追蹤連線不補登，釋出名額後新連線可登記。Worker 只記一筆 `6009`，`UntrackedSubscriptions` 為 2，累計值取走後無重複摘要。並行登記、已取消連線、異房登記與移除不存在紀錄亦有斷言。原有 25 例測試與斷言保留。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-p2-focused.trx`。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 完整 PostgreSQL 回歸 307 通過、0 失敗、0 略過，耗時 1 分 20 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-p2-full.trx`。
+
+## S6 房碼回收與 SignalR 連線清理（2026-11-20）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 通過，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 真 PostgreSQL 驗證提前關房保留原冷卻期限、期限已到但仍有 Room 引用時保留、跳鎖後取滿 100 筆、啟動跨批補清及重跑。並行測試透過 `pg_blocking_pids` 證明建房等待回收交易。回收提交後可重配相同碼，舊 Credential 對新房回 401，新 Credential 回 200；回收回滾則舊碼仍被保留。
+- SignalR 使用測試 Host 的 WebSocket 與真 PostgreSQL，驗證提前關房、重複訂閱、關房與第二次訂閱檢查的競爭、通知故障、Worker 補清到期／已關／已刪房、他房仍可接收提示，以及 Worker 停用時的已關房 REST 和新訂閱拒絕。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~RoomCodeCleanupTests|FullyQualifiedName~RoomHubTests|FullyQualifiedName~RoomCleanupTests"` 通過 25 例、0 失敗、0 略過。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-focused.trx`。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 完整回歸 305 通過、0 失敗、0 略過，耗時 1 分 21 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-second-full.trx`。1,500 條追蹤的高負載行為及重房積壓清理時限仍待壓測。
+
+## S6 整輪預算 P3 驗證（2026-11-20）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 通過，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter FullyQualifiedName~RoomCleanupTests` 通過 12 例，0 失敗、0 略過。原有 10 例斷言維持原樣。新增 2 例在測試 Host 使用 scripted store 與手動時鐘，直接推進 20 秒期限，單例實際用時約 2.2 及 2.9 秒。驗證進度事件 `6006` 為 Warning、欄位為 2 批／200 房，無進度以 `6002` 累加失敗，以及有先前的失敗時仍能歸零。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-p3-focused.trx`。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 在 Docker Compose PostgreSQL 執行完整回歸，296 通過、0 失敗、0 略過，耗時 1 分 20 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-p3-full.trx`。
+
+## S6 主資料清理收尾驗證（2026-11-20）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 通過，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter FullyQualifiedName~RoomCleanupTests` 在本機 Docker Compose PostgreSQL 上 10 例通過，0 失敗、0 略過。涵蓋同一 Host 的失敗輪數 1 → 2 → 成功 → 1、未預期例外的安全日誌與 API 存活、批次 100 → 50 → 60、跨輪保留、單房逾時後結束當輪、PostgreSQL 與 Npgsql 指令逾時回滾。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-hardening-focused.trx`。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 完整回歸 294 通過、0 失敗、0 略過，耗時 1 分 20 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-hardening-full.trx`。
+
+## S6 主資料清理驗證（2026-11-20）
+
+- Docker Compose 的 PostgreSQL 健康檢查通過。.NET Release Build 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- S6 專項 PostgreSQL 測試 6 例通過。涵蓋 102 個交錯失效房間的跨類別排序及分批、跳過鎖定房間及解鎖後補清、重跑、提交時失敗與 PostgreSQL 敘述逾時的回滾、待清量查詢故障後繼續處理多批，以及主機啟動補清。亦驗證停用設定可由測試主機覆寫、API 與 Worker 使用不同連線池、有效房間及房碼保留，清理後舊 Credential 回 401。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-main-data.trx`。
+- 首輪完整測試 289 通過、1 失敗。既有 `FullRoom_ReturnsAllMaxSizeItemsAndHasMatchingOrderIndex` 的內容和順序斷言通過，EXPLAIN 卻選用 `ix_items_owner` 加 `Sort`，觸發索引名稱斷言。S6 版本單跑該案例通過，未修改測試的基準提交 `85bc2db` 完整 284 例通過。在基準提交的暫存副本對測試資料執行 `ANALYZE clipboard_items` 後，重現同一個索引選擇和斷言失敗。此診斷證明既有斷言會受統計影響，未確認首輪是哪次統計更新造成。
+- 最終完整 Release 測試 290 通過、0 失敗、0 略過，耗時 1 分 21 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/s6-release.trx`。
+- 另以暫存探針執行正式 Worker 與 Application 流程，令第一批回報滿批、第二批執行 PostgreSQL `pg_sleep(29)`。第二批於啟動後 20.02 秒收到取消，未開始第三批。此探針驗證取消傳到資料庫，正式刪除交易的 5 秒敘述逾時回滾由 S6 專項測試覆蓋。滿載下 10 分鐘內實體刪除的目標尚待量測。
+
 ## S5 合併前修整驗證（2026-11-20）
 
 - 修正前先跑兩個新案例。跨午夜案例在日期分隔後第一則訊息的可見作者標籤斷言出現 `element(s) not found`，重現缺失。平滑捲動中斷案例通過。

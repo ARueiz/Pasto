@@ -69,7 +69,7 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 | FR-04 | 房主關房提交後拒絕新操作；以通知及狀態檢查使他人 UI 失效。Worker 停止仍不能讀寫過期房。 |
 | FR-05 | 方案 A 合併通知後重取整份快照，不每則各發一次 GET；取得後整體替換；無逐筆事件重放。 |
 | FR-06 | 顯示載入、同步中、斷線、限流、結果不確定、身分失效及房間失效。寫入不受同步狀態限制，直接向 REST 送出，且不排離線操作。已顯示文字仍可複製。 |
-| NFR-01 | HTTPS/WSS、純文字呈現／CSP、Credential／內容脫敏日誌、no-store；無跨房間資料與舊回應污染。匿名不是端對端加密。 |
+| NFR-01 | HTTPS/WSS、純文字呈現／CSP、敏感資料遮蔽、API／Hub 等敏感回應 `no-store`；無跨房間資料與舊回應污染。匿名不是端對端加密。 |
 | NFR-02 | DB Source of Truth，提交失敗不通知；提交成功後通知失敗不回滾或假報失敗；重複／亂序通知最多影響重抓頻率，不改本機資料內容。 |
 | NFR-03 | 1,000 連線／200 房／典型 5 人測試，另測熱房、同 NAT、併發、滿 300 筆、大量重連與 REST 補償流量；容量未驗證。 |
 | NFR-04 | 遺漏修復依 Q6；REST p95 ≤ 500 ms、提交到畫面 p95 ≤ 2 秒為候選效能值，不是已實測承諾。需記錄 429／5xx、合法操作成功率及讀取放大，不能靠拒絕正常流量達標。 |
@@ -77,6 +77,12 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 | NFR-06 | body、回應、請求、DB／Hub 連線、limiter partition、Client 工作與記憶體均有界；同房短交易、索引及可觀測性；重要邏輯有實測。 |
 
 ## 5. 初始安全與資源設定（待安全測試與壓測調整）
+
+部署以自架 Docker Compose 為主。AWS、Seq 與外部 SaaS 監控為選配。任何不受信任的裝置或使用者能連線的環境均視為公開部署，包含可由訪客 Wi-Fi 或 BYOD 存取的內網。受信任內網亦須保留驗證、限流及敏感資料保護。S7 完成前不得公開部署。 [ADR 0004](decisions/0004-observability-and-deployment.md)
+
+日誌、Tracing、Metrics 與代理診斷須防止揭露六碼房碼、Credential（含 SignalR `access_token`）、使用者文字、Authorization、Cookie 及 DB 密碼。完整 HTTP Body 排除在收集範圍外。實際 URL 中的房碼與 token 須移除，metric 只使用低基數路由模板。RoomId 可用於日誌關聯，不能用作 metric tag。各階段驗證實際輸出。
+
+健康檢查區分程序存活與 DB 就緒，清理 Worker 狀態另行回報。部署啟動時一次檢查 schema，確認不相容須以非零碼結束。靜態入口頁重新驗證，有內容 hash 的資產可長期快取。 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)
 
 以下都是可設定的實驗起點。依 [ADR 0003](decisions/0003-mvp-scope-reduction.md)，MVP 只實作「公開建房」、「公開加入／猜碼」的 token bucket、「已驗證 REST」的新增／刪除限制、「每房寫入／新 Participant」的 Participant 上限與「DB pool」；其餘列於 S7 依安全測試／壓測補齊，補齊前不發布公開站台。Token bucket 表示持續補充速率與最大 burst；時間窗／失敗計數另明定。拒絕回 429／Retry-After；過載回 503。公開入口不新增獨立的「查房是否存在」介面，查詢／加入共用防護。
 

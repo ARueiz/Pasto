@@ -18,12 +18,14 @@ internal static class RoomEndpoints
             return Results.Ok(new RoomStateResponse(state));
         }).WithName(StateName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
 
-        app.MapDelete("/api/rooms/{roomId:guid}", async (Guid roomId, HttpContext context, CloseRoom close, RoomChangeNotifications notifications,
+        app.MapDelete("/api/rooms/{roomId:guid}", async (Guid roomId, HttpContext context, CloseRoom close,
+            RoomChangeNotifications notifications, RoomConnections connections,
             CancellationToken cancellationToken) =>
         {
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
             var result = await close.ExecuteAsync(roomId, identity.ParticipantId, cancellationToken);
             await notifications.PublishAsync(roomId, result.CommittedVersion);
+            connections.AbortRooms(new HashSet<Guid> { roomId });
             return Results.NoContent();
         }).WithName(CloseName).RequireAuthorization().AddEndpointFilter<ParticipantWriteFilter>();
     }

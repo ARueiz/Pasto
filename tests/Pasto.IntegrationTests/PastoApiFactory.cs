@@ -13,6 +13,7 @@ internal sealed class PastoApiFactory(string connectionString,
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Pasto", connectionString);
+        builder.UseSetting("Cleanup:Enabled", "false");
         if (settings is not null)
             foreach (var (key, value) in settings) builder.UseSetting(key, value);
         builder.ConfigureLogging(logging =>

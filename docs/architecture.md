@@ -181,7 +181,9 @@ Hub 無法使用時，Client 仍以 REST 載入及手動更新快照，並以同
 
 401／RoomUnavailable 是該身分／UUID 的終止狀態：增加 generation、清文字／該房 Credential、停工作與連線，不自動 Join 同 Code。到期倒數可用 expiresAt／serverTime 校準，但 DB 判定才是權威。已顯示文字仍可複製，背景節流／離線不保證修復時限。
 
-host 維持有界 connectionId／RoomId／Participant／到期追蹤。關房 commit 後盡力提示並清 group／中止連線，到期亦清線；group 並非授權。清線通知可能延遲，所有 REST 與 Hub invocation 仍重驗，沒有正文推播。DB commit 後程序中斷仍可能漏通知，靠上述 REST 校正；無持久回放、Outbox、Message Queue 或 exactly-once。
+Host 有界追蹤已驗證訂閱的 connectionId、RoomId 與中止連線的回呼，Participant 身分由 Hub 既有驗證流程取得，期限由 Worker 分批依 DB 時間複驗。關房 commit 後盡力提示並中止同房連線，SignalR 斷線時移除群組成員。Worker 補清到期、已關與已刪除房間的連線。清線可能延遲，REST 與 Hub invocation 仍各自重驗。通知仍可能遺漏，由 REST 校正；沒有正文推播、持久回放、Outbox、Message Queue 或 exactly-once。
+
+1,500 條上限只限制 Host 的追蹤表記憶體。滿載時仍加入群組並做加入後的 DB 複驗。完成訂閱後只在該連線生命週期記住未追蹤狀態，名額釋出後由新訂閱使用，既有未追蹤連線不補登。關房及 Worker 只中止已追蹤連線。未追蹤連線仍會收到既有提示，並透過 REST 404 或主資料已移除後的 401、前景輪詢及 Client 失效流程停止連線。Worker 每輪最多記錄一次 `6009 RoomConnectionTrackingFull` Warning，摘要為期間內成功但未追蹤的訂閱數 `UntrackedSubscriptions`，停用 Worker 時不輸出這項摘要。S7 的全站／Participant 等連線配額另行交付。
 
 ## 7. 冷卻、失效與清理
 
@@ -220,7 +222,8 @@ HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻�
 - HTTPS/WSS、同源優先；開發 CORS 精確 allowlist，WebSocket Origin 另驗，不能用 CORS 代替授權。
 - 分享 URL／QR 只帶 Code；QR 在 Client 對加入 URL 產生，不使用第三方遠端 QR 服務，不於本次選套件或實作。
 - Credential／Content 不記一般 log、例外或 analytics；房碼也預設遮蔽，指標避免高基數。SignalR Browser transport 的 access_token query 特例只在精確 Hub 路徑讀取，代理／APM／trace 全鏈路脫敏。[SignalR security](https://learn.microsoft.com/en-us/aspnet/core/signalr/security?view=aspnetcore-10.0)
-- Referrer-Policy: no-referrer、Cache-Control: no-store、CSP；React 文字節點／textarea，不用 dangerouslySetInnerHTML、不自動預覽／執行 URL；文字不存 localStorage 或 Service Worker cache。
+- Referrer-Policy 設為 `no-referrer`，套用 CSP。API、Hub 等敏感回應使用 `no-store`。部署後的 `index.html` 採 `no-cache`，帶內容 hash 的資產長期快取。React 文字以文字節點／textarea 呈現，排除 `dangerouslySetInnerHTML`、URL 自動預覽或執行，也不寫入 localStorage 或 Service Worker cache。
+- 六碼房碼、Bearer／SignalR Credential、使用者文字、Authorization、Cookie 與 DB 密碼均屬敏感資料。應用程式日誌、OTel、Caddy 和其他診斷層都要處理分享路徑及 query，排除完整請求／回應 Body。RoomId 可用於日誌關聯。保留 `ApiFailureMiddleware` 與型別／堆疊框架的例外記錄策略。
 - sessionStorage 可被同源腳本讀取，不等同 HttpOnly；不自動附帶登入 cookie。若未來改 cookie，重評 CSRF。連線字串與簽章金鑰用部署 secret，不進 repo。
 - 匿名不是無網路識別，伺服器可讀文字、不承諾端對端加密；截圖、剪貼簿、已下載內容與憑證副本無法遠端收回。
 
@@ -235,6 +238,12 @@ HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻�
 本次不建立 RoomFiles、IFileStorage、檔案 API、Object Storage 服務或相關套件，只記錄演進方向。
 
 ## 11. 驗證與演進條件
+
+### 部署與可觀測性方向
+
+自架 Compose 為主要部署形式。ASP.NET Core 提供 Vite 產物，與 API／SignalR 同源。Caddy 負責 TLS，內網用 Internal CA 或自備憑證。一次性 Migration Job 執行 DDL，API 帳號啟動時唯讀確認 schema，不相容即停止。部署與健康檢查的網路界線見 [ADR 0004](decisions/0004-observability-and-deployment.md)。
+
+應用程式使用 `ILogger<T>` 與 Serilog 輸出 Console，Docker 負責輪替。OpenTelemetry 收集指標與 trace，依設定啟用 OTLP。ASP.NET Core 分開回報存活與 DB 就緒，另提供 Worker 狀態。Seq 與 AWS 收集為選配。以上待各階段交付。目前中介軟體仍對一般回應設定 `no-store`，代理僅接受列舉 IP，啟動未檢查 schema，根目錄 Compose 僅供本機 PostgreSQL 驗證。 [分階段驗收](sprint-1-implementation-plan.md)
 
 第一階段以真 PostgreSQL 對正式 Migration 與正式 use case 驗證 Creator／Owner 複合 FK、EF 排序、deferred commit、cascade、同房併發及期限，不用 EF InMemory／SQLite 取代。列表驗證同交易快照、排序與滿房完整回傳；Client 驗證 dirty／generation／單一 round，無需事件重放測試框架。
 

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -28,18 +29,31 @@ builder.Services.AddOptions<DatabaseOptions>().BindConfiguration("Database")
 builder.Services.AddSingleton<NpgsqlDataSource>(services =>
 {
     var settings = services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
-    var connection = new NpgsqlConnectionStringBuilder(connectionString)
-    {
-        MaxPoolSize = settings.MaxPoolSize,
-        MinPoolSize = 0,
-        Pooling = true,
-        IncludeErrorDetail = false,
-        LogParameters = false
-    };
-    return NpgsqlDataSource.Create(connection.ConnectionString);
+    return CreateDataSource(connectionString, settings.MaxPoolSize);
 });
 builder.Services.AddDbContextFactory<PastoDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<NpgsqlDataSource>()));
+builder.Services.AddOptions<RoomCleanupOptions>().BindConfiguration("Cleanup")
+    .Validate(options => options.MaxPoolSize is >= 1 and <= 4, "Cleanup MaxPoolSize must be between 1 and 4.")
+    .ValidateOnStart();
+builder.Services.AddKeyedSingleton<NpgsqlDataSource>("RoomCleanup", (services, _) =>
+{
+    var settings = services.GetRequiredService<IOptions<RoomCleanupOptions>>().Value;
+    return CreateDataSource(connectionString, settings.MaxPoolSize);
+});
+builder.Services.AddSingleton(services =>
+{
+    var options = new DbContextOptionsBuilder<PastoDbContext>()
+        .UseNpgsql(services.GetRequiredKeyedService<NpgsqlDataSource>("RoomCleanup"),
+            postgres => postgres.CommandTimeout(5))
+        .Options;
+    return new RoomCleanupStore(new PooledDbContextFactory<PastoDbContext>(options, poolSize: 1));
+});
+builder.Services.AddSingleton<IRoomCleanupStore>(services => services.GetRequiredService<RoomCleanupStore>());
+builder.Services.AddSingleton<CleanUpRooms>();
+builder.Services.AddSingleton<RoomConnections>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHostedService<RoomCleanupWorker>();
 builder.Services.AddOptions<ApiOptions>().BindConfiguration("Api")
     .Validate(options => options.IsValid(), "API rate limits and trusted proxy IP addresses must be valid.").ValidateOnStart();
 builder.Services.AddOptions<ForwardedHeadersOptions>().Configure<IOptions<ApiOptions>>((options, api) =>
@@ -105,6 +119,19 @@ app.MapItems();
 app.MapHub<RoomHub>(RoomHub.Path).RequireAuthorization();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
+
+static NpgsqlDataSource CreateDataSource(string connectionString, int maxPoolSize)
+{
+    var connection = new NpgsqlConnectionStringBuilder(connectionString)
+    {
+        MaxPoolSize = maxPoolSize,
+        MinPoolSize = 0,
+        Pooling = true,
+        IncludeErrorDetail = false,
+        LogParameters = false
+    };
+    return NpgsqlDataSource.Create(connection.ConnectionString);
+}
 
 // WebApplicationFactory 載入實際 Program 與 DI／middleware。
 public partial class Program;

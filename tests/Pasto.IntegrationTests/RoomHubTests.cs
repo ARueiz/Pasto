@@ -5,11 +5,13 @@ using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pasto.Server.Application.Rooms;
 using Pasto.Server.Infrastructure.Persistence;
 using Pasto.Server.Infrastructure.Security;
@@ -27,6 +29,7 @@ public sealed class RoomHubTests
         await using var database = await PostgresTestDatabase.CreateAsync();
         var room = await CreateRoomAsync(database);
         var other = await CreateRoomAsync(database);
+        await using var verification = database.CreateContext();
         await using var factory = new PastoApiFactory(database.ConnectionString);
         using var client = factory.CreateClient();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -37,6 +40,7 @@ public sealed class RoomHubTests
         var outsider = new HubMessages(otherSocket, cancellation);
         await member.HandshakeAsync();
         await outsider.HandshakeAsync();
+        Assert.False((await member.SubscribeAsync(room.RoomId)).TryGetProperty("error", out _));
         Assert.False((await member.SubscribeAsync(room.RoomId)).TryGetProperty("error", out _));
         Assert.Contains("ParticipantUnauthorized", (await outsider.SubscribeAsync(room.RoomId)).GetProperty("error").GetString());
         Assert.False((await outsider.SubscribeAsync(other.RoomId)).TryGetProperty("error", out _));
@@ -52,13 +56,187 @@ public sealed class RoomHubTests
         Assert.Equal(HttpStatusCode.OK, repeated.StatusCode);
         using var closed = await SendAsync(client, room, HttpMethod.Delete, "");
         Assert.Equal(HttpStatusCode.NoContent, closed.StatusCode);
-        await member.ExpectHintAsync(room.RoomId, "3");
-        Assert.Contains("RoomUnavailable", (await member.SubscribeAsync(room.RoomId)).GetProperty("error").GetString());
+        await member.ExpectClosedAsync(room.RoomId, "3");
+        Assert.True(await verification.Rooms.AnyAsync(x => x.Id == room.RoomId && x.DeletedAt != null));
+        using var unavailable = await SendAsync(client, room, HttpMethod.Get, "");
+        Assert.Equal(HttpStatusCode.NotFound, unavailable.StatusCode);
+        using var resubscribeSocket = await ConnectAsync(factory, room.Credential, cancellation);
+        var resubscriber = new HubMessages(resubscribeSocket, cancellation);
+        await resubscriber.HandshakeAsync();
+        Assert.Contains("RoomUnavailable", (await resubscriber.SubscribeAsync(room.RoomId)).GetProperty("error").GetString());
 
         using var outsiderAdd = await SendAsync(client, other, HttpMethod.Post, "/items", "other text");
         Assert.Equal(HttpStatusCode.Created, outsiderAdd.StatusCode);
         // An incorrectly broadcast hint would arrive ahead of the other room's own hint.
         await outsider.ExpectHintAsync(other.RoomId, "1");
+    }
+
+    [Fact]
+    public async Task Close_AbortsSubscriptionInProgressEvenWhenHintFails()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var room = await CreateRoomAsync(database);
+        var state = new HoldSecondStateRead(new RoomStateStore(database.CreateContextFactory()));
+        var send = new FailedSend();
+        await using var factory = new PastoApiFactory(database.ConnectionString, configureServices: services =>
+        {
+            services.AddSingleton<IRoomStateStore>(state);
+            services.AddSingleton(send);
+            services.AddSingleton(typeof(HubLifetimeManager<>), typeof(FailingHubLifetimeManager<>));
+        });
+        using var client = factory.CreateClient();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var socket = await ConnectAsync(factory, room.Credential, deadline.Token);
+        var member = new HubMessages(socket, deadline.Token);
+        await member.HandshakeAsync();
+        await member.StartSubscribeAsync(room.RoomId);
+        await state.Waiting.Task.WaitAsync(deadline.Token);
+
+        using var closed = await SendAsync(client, room, HttpMethod.Delete, "");
+        Assert.Equal(HttpStatusCode.NoContent, closed.StatusCode);
+        Assert.Equal(1, send.Attempts);
+        await state.Interrupted.Task.WaitAsync(deadline.Token);
+        await member.ExpectClosedAsync(room.RoomId, "1");
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("closed")]
+    [InlineData("missing")]
+    public async Task Worker_AbortsOnlySubscriptionsToUnavailableRooms(string state)
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var room = await CreateRoomAsync(database);
+        var other = await CreateRoomAsync(database);
+        var hold = new HoldMainCleanup();
+        await using var factory = new PastoApiFactory(database.ConnectionString,
+            new Dictionary<string, string?> { ["Cleanup:Enabled"] = "true" },
+            services => services.AddSingleton<IRoomCleanupStore>(hold));
+        using var client = factory.CreateClient();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+        await hold.Waiting.Task.WaitAsync(deadline.Token);
+        using var socket = await ConnectAsync(factory, room.Credential, deadline.Token);
+        using var otherSocket = await ConnectAsync(factory, other.Credential, deadline.Token);
+        var member = new HubMessages(socket, deadline.Token);
+        var outsider = new HubMessages(otherSocket, deadline.Token);
+        await member.HandshakeAsync();
+        await outsider.HandshakeAsync();
+        Assert.False((await member.SubscribeAsync(room.RoomId)).TryGetProperty("error", out _));
+        Assert.False((await outsider.SubscribeAsync(other.RoomId)).TryGetProperty("error", out _));
+        await using var setup = database.CreateContext();
+        if (state == "expired")
+        {
+            await setup.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE rooms SET created_at = clock_timestamp() - interval '5 hours',
+                                 expires_at = clock_timestamp() - interval '1 second'
+                WHERE id = {room.RoomId}
+                """);
+        }
+        else
+        {
+            await new CloseRoom(new RoomClosureStore(database.CreateContextFactory())).ExecuteAsync(room.RoomId, room.ParticipantId);
+            if (state == "missing")
+                Assert.Equal(1, await new RoomCleanupStore(database.CreateContextFactory()).DeleteBatchAsync(1, default));
+        }
+
+        hold.Resume.TrySetResult();
+        await member.ExpectClosedAsync(room.RoomId, "1");
+        using var added = await SendAsync(client, other, HttpMethod.Post, "/items", "still connected");
+        Assert.Equal(HttpStatusCode.Created, added.StatusCode);
+        await outsider.ExpectHintAsync(other.RoomId, "1");
+    }
+
+    [Fact]
+    public async Task TrackingAtCapacity_SubscriptionsStayLiveAndWorkerReportsOneSummary()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var trackedRoom = await CreateRoomAsync(database);
+        var overflowRoom = await CreateRoomAsync(database);
+        var nextRoom = await CreateRoomAsync(database);
+        var hold = new HoldMainCleanup();
+        var logs = new TrackingLogger();
+        var registry = new RoomConnections(logs, capacity: 1);
+        await using var factory = new PastoApiFactory(database.ConnectionString,
+            new Dictionary<string, string?> { ["Cleanup:Enabled"] = "true" },
+            services =>
+            {
+                services.AddSingleton(registry);
+                services.AddSingleton<IRoomCleanupStore>(hold);
+            });
+        using var client = factory.CreateClient();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+        var cancellation = deadline.Token;
+        await hold.Waiting.Task.WaitAsync(cancellation);
+        using var trackedSocket = await ConnectAsync(factory, trackedRoom.Credential, cancellation);
+        using var firstSocket = await ConnectAsync(factory, overflowRoom.Credential, cancellation);
+        using var secondSocket = await ConnectAsync(factory, overflowRoom.Credential, cancellation);
+        var tracked = new HubMessages(trackedSocket, cancellation);
+        var first = new HubMessages(firstSocket, cancellation);
+        var second = new HubMessages(secondSocket, cancellation);
+        await tracked.HandshakeAsync();
+        await first.HandshakeAsync();
+        await second.HandshakeAsync();
+        Assert.False((await tracked.SubscribeAsync(trackedRoom.RoomId)).TryGetProperty("error", out _));
+        Assert.False((await first.SubscribeAsync(overflowRoom.RoomId)).TryGetProperty("error", out _));
+        Assert.False((await second.SubscribeAsync(overflowRoom.RoomId)).TryGetProperty("error", out _));
+        Assert.Equal(new[] { trackedRoom.RoomId }, registry.GetRoomIds());
+        Assert.False(logs.Events.Reader.TryRead(out _));
+
+        using var added = await SendAsync(client, overflowRoom, HttpMethod.Post, "/items", "still connected");
+        Assert.Equal(HttpStatusCode.Created, added.StatusCode);
+        await first.ExpectHintAsync(overflowRoom.RoomId, "1");
+        await second.ExpectHintAsync(overflowRoom.RoomId, "1");
+
+        using var trackedClose = await SendAsync(client, trackedRoom, HttpMethod.Delete, "");
+        Assert.Equal(HttpStatusCode.NoContent, trackedClose.StatusCode);
+        await tracked.ExpectClosedAsync(trackedRoom.RoomId, "1");
+        while (registry.GetRoomIds().Length > 0)
+            await Task.Delay(10, cancellation);
+
+        Assert.False((await first.SubscribeAsync(overflowRoom.RoomId)).TryGetProperty("error", out _));
+        Assert.Empty(registry.GetRoomIds());
+        using var nextSocket = await ConnectAsync(factory, nextRoom.Credential, cancellation);
+        var next = new HubMessages(nextSocket, cancellation);
+        await next.HandshakeAsync();
+        Assert.False((await next.SubscribeAsync(nextRoom.RoomId)).TryGetProperty("error", out _));
+        Assert.Equal(new[] { nextRoom.RoomId }, registry.GetRoomIds());
+
+        using var overflowClose = await SendAsync(client, overflowRoom, HttpMethod.Delete, "");
+        Assert.Equal(HttpStatusCode.NoContent, overflowClose.StatusCode);
+        await first.ExpectHintAsync(overflowRoom.RoomId, "2");
+        await second.ExpectHintAsync(overflowRoom.RoomId, "2");
+        Assert.Contains("RoomUnavailable", (await first.SubscribeAsync(overflowRoom.RoomId)).GetProperty("error").GetString());
+        Assert.Contains("RoomUnavailable", (await second.SubscribeAsync(overflowRoom.RoomId)).GetProperty("error").GetString());
+        Assert.Equal(new[] { nextRoom.RoomId }, registry.GetRoomIds());
+
+        hold.Resume.TrySetResult();
+        var summary = await logs.Events.Reader.ReadAsync(cancellation);
+        Assert.Equal((6009, "RoomConnectionTrackingFull", LogLevel.Warning, 2L), summary);
+        // 摘要取出既有累計值，下一次檢查不會重複記錄。
+        registry.ReportUntrackedSubscriptions();
+        Assert.False(logs.Events.Reader.TryRead(out _));
+    }
+
+    [Fact]
+    public void Tracking_ConcurrentRegistrationsRespectCapacityAndMissingUntrackDoesNotEvict()
+    {
+        var registry = new RoomConnections(NullLogger<RoomConnections>.Instance, capacity: 1);
+        var rooms = Enumerable.Range(0, 32).Select(_ => Guid.NewGuid()).ToArray();
+        var results = new RoomTrackingResult[rooms.Length];
+        Parallel.For(0, rooms.Length, index =>
+            results[index] = registry.TryTrack(index.ToString(), rooms[index], default, () => { }));
+
+        var trackedIndex = Array.IndexOf(results, RoomTrackingResult.Tracked);
+        Assert.Single(results, result => result == RoomTrackingResult.Tracked);
+        Assert.Equal(31, results.Count(result => result == RoomTrackingResult.AtCapacity));
+        var id = trackedIndex.ToString();
+        var room = rooms[trackedIndex];
+        Assert.Equal(RoomTrackingResult.Tracked, registry.TryTrack(id, room, default, () => { }));
+        Assert.Equal(RoomTrackingResult.RoomMismatch, registry.TryTrack(id, Guid.NewGuid(), default, () => { }));
+        Assert.Equal(RoomTrackingResult.ConnectionAborted,
+            registry.TryTrack(id, room, new CancellationToken(true), () => { }));
+        registry.Untrack("not registered");
+        Assert.Equal(new[] { room }, registry.GetRoomIds());
     }
 
     [Fact]
@@ -144,17 +322,38 @@ public sealed class RoomHubTests
 
         public async Task<JsonElement> SubscribeAsync(Guid roomId)
         {
-            var invocationId = (++invocation).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            await SendAsync(new { type = 1, target = "SubscribeRoom", invocationId, arguments = new[] { roomId } });
+            var invocationId = await StartSubscribeAsync(roomId);
             var response = await ReadAsync();
             Assert.Equal(3, response.GetProperty("type").GetInt32());
             Assert.Equal(invocationId, response.GetProperty("invocationId").GetString());
             return response;
         }
 
+        public async Task<string> StartSubscribeAsync(Guid roomId)
+        {
+            var invocationId = (++invocation).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await SendAsync(new { type = 1, target = "SubscribeRoom", invocationId, arguments = new[] { roomId } });
+            return invocationId;
+        }
+
         public async Task ExpectHintAsync(Guid roomId, string version)
         {
+            AssertHint(await ReadAsync(), roomId, version);
+        }
+
+        public async Task ExpectClosedAsync(Guid roomId, string version)
+        {
             var response = await ReadAsync();
+            if (response.GetProperty("type").GetInt32() == 1)
+            {
+                AssertHint(response, roomId, version);
+                response = await ReadAsync();
+            }
+            Assert.Equal(7, response.GetProperty("type").GetInt32());
+        }
+
+        private static void AssertHint(JsonElement response, Guid roomId, string version)
+        {
             Assert.Equal(1, response.GetProperty("type").GetInt32());
             Assert.Equal("RoomChanged", response.GetProperty("target").GetString());
             var hint = Assert.Single(response.GetProperty("arguments").EnumerateArray());
@@ -185,12 +384,73 @@ public sealed class RoomHubTests
                 do
                 {
                     received = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellation);
+                    if (received.MessageType == WebSocketMessageType.Close)
+                        return JsonSerializer.SerializeToElement(new { type = 7 });
                     Assert.Equal(WebSocketMessageType.Text, received.MessageType);
                     message.Write(buffer, 0, received.Count);
                 } while (!received.EndOfMessage);
                 foreach (var frame in Encoding.UTF8.GetString(message.ToArray()).Split('\u001e', StringSplitOptions.RemoveEmptyEntries))
                     frames.Enqueue(frame);
             }
+        }
+    }
+
+    private sealed class HoldSecondStateRead(IRoomStateStore store) : IRoomStateStore
+    {
+        private int reads;
+        public TaskCompletionSource Waiting { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Interrupted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<RoomState> GetAsync(Guid roomId, Guid participantId, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref reads) == 2)
+            {
+                Waiting.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    Interrupted.TrySetResult();
+                    throw;
+                }
+            }
+            return await store.GetAsync(roomId, participantId, cancellationToken);
+        }
+    }
+
+    private sealed class HoldMainCleanup : IRoomCleanupStore
+    {
+        public TaskCompletionSource Waiting { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<RoomCleanupBacklog> MeasureBacklogAsync(CancellationToken cancellationToken)
+        {
+            Waiting.TrySetResult();
+            await Resume.Task.WaitAsync(cancellationToken);
+            return new RoomCleanupBacklog(0, null);
+        }
+
+        public Task<int> DeleteBatchAsync(int batchSize, CancellationToken cancellationToken) => Task.FromResult(0);
+    }
+
+    private sealed class TrackingLogger : ILogger<RoomConnections>
+    {
+        public Channel<(int Id, string? Name, LogLevel Level, long Count)> Events { get; }
+            = Channel.CreateUnbounded<(int, string?, LogLevel, long)>();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (eventId.Id != 6009)
+                return;
+
+            var entries = Assert.IsAssignableFrom<IEnumerable<KeyValuePair<string, object?>>>(state);
+            var count = Assert.IsType<long>(entries.Single(entry => entry.Key == "UntrackedSubscriptions").Value);
+            Events.Writer.TryWrite((eventId.Id, eventId.Name, logLevel, count));
         }
     }
 
