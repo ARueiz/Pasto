@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Pasto.Server.Application.Items;
+using Pasto.Server.Application.Rooms;
 using Pasto.Server.Observability;
 
 namespace Pasto.Server.Api;
@@ -39,6 +40,7 @@ internal static class ItemEndpoints
 
         app.MapPost("/api/rooms/{roomId:guid}/items", async (Guid roomId, AddItemRequest request,
             HttpContext context, AddItem add, RoomChangeNotifications notifications, ServerMetrics metrics,
+            IStorageFailureClassifier storageFailures,
             CancellationToken cancellationToken) =>
         {
             var identity = ParticipantAuthenticationHandler.Identity(context, roomId);
@@ -49,7 +51,8 @@ internal static class ItemEndpoints
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                metrics.ItemAddFailed();
+                if (ApiFailureMiddleware.Classify(exception, storageFailures).Status is >= 500 and < 600)
+                    metrics.ItemAddFailed();
                 throw;
             }
             await notifications.PublishAsync(roomId, result.CommittedVersion);

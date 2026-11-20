@@ -1,13 +1,19 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Npgsql;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
+using Pasto.Server.Application.Items;
 using Pasto.Server.Application.Rooms;
+using Pasto.Server.Infrastructure.Persistence;
 using Pasto.Server.Observability;
 using Xunit;
 
@@ -47,44 +53,77 @@ public sealed class TelemetryTests
         }
     }
 
-    [Fact]
-    public async Task CustomMeter_RecordsItemAndCleanupFailuresWithoutTags()
+    [Theory]
+    [InlineData("empty", HttpStatusCode.BadRequest)]
+    [InlineData("limit", HttpStatusCode.Conflict)]
+    [InlineData("unavailable", HttpStatusCode.NotFound)]
+    [InlineData("participant", HttpStatusCode.Unauthorized)]
+    [InlineData("storage", HttpStatusCode.ServiceUnavailable)]
+    [InlineData("busy", HttpStatusCode.ServiceUnavailable)]
+    [InlineData("unexpected", HttpStatusCode.InternalServerError)]
+    public async Task ItemFailureMeter_OnlyCountsServerFailuresWithoutTags(string failure, HttpStatusCode expectedStatus)
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         var room = await TestRoomCreation.Create(database, new SequenceRoomSecrets("METRIC")).ExecuteAsync();
-        var worker = new FailingCleanupStore();
-        await using var factory = new PastoApiFactory(database.ConnectionString,
-            new Dictionary<string, string?> { ["Cleanup:Enabled"] = "true" },
-            services => services.AddSingleton<IRoomCleanupStore>(worker));
-        using var client = factory.CreateClient();
-        var meter = factory.Services.GetRequiredService<IMeterFactory>().Create(ServerMetrics.MeterName);
-        var measurements = new ConcurrentQueue<(string Name, long Value, int TagCount)>();
-        var recordedCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, activeListener) =>
+        Exception exception = failure switch
         {
-            if (ReferenceEquals(instrument.Meter, meter))
-                activeListener.EnableMeasurementEvents(instrument);
+            "limit" => new RoomItemLimitReachedException(),
+            "unavailable" => new RoomUnavailableException(),
+            "participant" => new RoomParticipantMismatchException(),
+            "storage" => new NpgsqlException("Test storage failure"),
+            "busy" => new RoomBusyException(new TimeoutException()),
+            _ => new InvalidOperationException("Test item store failure")
         };
-        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-        {
-            measurements.Enqueue((instrument.Name, value, tags.Length));
-            if (instrument.Name == "pasto.cleanup.failures")
-                recordedCleanup.TrySetResult();
-        });
-        listener.Start();
-        worker.Release.TrySetResult();
+        await using var factory = new PastoApiFactory(database.ConnectionString, configureServices: services =>
+            services.AddSingleton<IItemAdditionStore>(new RejectingItemStore(exception)));
+        using var client = factory.CreateClient();
+        using var metrics = new CapturedMeasurements(factory.Services);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/rooms/{room.RoomId}/items")
         {
-            Content = JsonContent.Create(new { content = "" })
+            Content = JsonContent.Create(new { content = failure == "empty" ? "" : "test item" })
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", room.Credential);
         using var failed = await client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.BadRequest, failed.StatusCode);
-        await recordedCleanup.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Contains(("pasto.cleanup.failures", 1L, 0), measurements);
-        Assert.Contains(("pasto.item.add.failures", 1L, 0), measurements);
+        Assert.Equal(expectedStatus, failed.StatusCode);
+        if ((int)expectedStatus >= 500)
+            Assert.Equal(("pasto.item.add.failures", 1L, 0), Assert.Single(metrics.Entries));
+        else
+            Assert.Empty(metrics.Entries);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupFailureMeter_MatchesMainRoundOnlyEvenWhenMaintenanceFails(bool mainRoundFails)
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var primary = new ControlledCleanupStore(mainRoundFails);
+        using var logs = new CleanupMaintenanceLogs();
+        await using var factory = new PastoApiFactory(database.ConnectionString,
+            new Dictionary<string, string?> { ["Cleanup:Enabled"] = "true" },
+            services =>
+            {
+                services.AddSingleton<IRoomCleanupStore>(primary);
+                services.AddSingleton(new RoomCleanupStore(database.CreateContextFactory(new FailReclaimQuery())));
+            }, logs);
+        using var client = factory.CreateClient();
+        using var metrics = new CapturedMeasurements(factory.Services);
+        primary.Release.TrySetResult();
+        await logs.ReclaimFailed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var status = factory.Services.GetRequiredService<RoomCleanupStatus>().Read();
+        if (mainRoundFails)
+        {
+            Assert.Equal(1, status.ConsecutiveFailures);
+            Assert.Equal(("pasto.cleanup.failures", 1L, 0), Assert.Single(metrics.Entries));
+        }
+        else
+        {
+            Assert.Equal(0, status.ConsecutiveFailures);
+            Assert.NotNull(status.LastSuccessfulAt);
+            Assert.Empty(metrics.Entries);
+        }
     }
 
     private sealed class CapturedSpans : BaseExporter<Activity>
@@ -98,7 +137,34 @@ public sealed class TelemetryTests
         }
     }
 
-    private sealed class FailingCleanupStore : IRoomCleanupStore
+    private sealed class CapturedMeasurements : IDisposable
+    {
+        private readonly MeterListener listener = new();
+        public ConcurrentQueue<(string Name, long Value, int TagCount)> Entries { get; } = new();
+
+        public CapturedMeasurements(IServiceProvider services)
+        {
+            var meter = services.GetRequiredService<IMeterFactory>().Create(ServerMetrics.MeterName);
+            listener.InstrumentPublished = (instrument, activeListener) =>
+            {
+                if (ReferenceEquals(instrument.Meter, meter))
+                    activeListener.EnableMeasurementEvents(instrument);
+            };
+            listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+                Entries.Enqueue((instrument.Name, value, tags.Length)));
+            listener.Start();
+        }
+
+        public void Dispose() => listener.Dispose();
+    }
+
+    private sealed class RejectingItemStore(Exception exception) : IItemAdditionStore
+    {
+        public Task<AddedItem> AddAsync(Guid roomId, Guid participantId, string content, int contentBytes,
+            CancellationToken cancellationToken) => throw exception;
+    }
+
+    private sealed class ControlledCleanupStore(bool fails) : IRoomCleanupStore
     {
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -109,6 +175,34 @@ public sealed class TelemetryTests
         }
 
         public Task<int> DeleteBatchAsync(int batchSize, CancellationToken cancellationToken)
-            => throw new InvalidOperationException("Test cleanup failure");
+            => fails ? throw new InvalidOperationException("Test cleanup failure") : Task.FromResult(0);
+    }
+
+    private sealed class FailReclaimQuery : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM room_code_reservations AS reservation", StringComparison.Ordinal))
+                throw new NpgsqlException("Test reclamation failure");
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class CleanupMaintenanceLogs : ILoggerProvider, ILogger
+    {
+        public TaskCompletionSource ReclaimFailed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ILogger CreateLogger(string categoryName) => this;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Dispose() { }
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (eventId.Id == 6008 && logLevel == LogLevel.Warning)
+                ReclaimFailed.TrySetResult();
+        }
     }
 }

@@ -141,7 +141,9 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 ## 10. OpenTelemetry
 
 - 開工前提 Hosting 擴充、ASP.NET Core instrumentation 與 OTLP exporter 方案。有 OTLP 端點才註冊 exporter，無設定時仍正常運作。日誌維持 Serilog。
-- HTTP 數量、錯誤率、耗時與 SignalR 連線優先訂閱 .NET 內建 meter。用 `System.Diagnostics.Metrics` 增加清理失敗及 Item 新增失敗計數。RoomId、ItemId、TraceId、ParticipantId、ConnectionId 與房碼禁止用作 metric tag。
+- HTTP 數量、錯誤率、耗時與 SignalR 連線優先訂閱 .NET 內建 meter。Client 錯誤率以 `http.server.request.duration` 依 `http.response.status_code` 觀察。兩個自訂計數器均無 tag，RoomId、ItemId、TraceId、ParticipantId、ConnectionId 與房碼禁止用作 metric tag。
+  - `pasto.item.add.failures` 計入 `AddItem.ExecuteAsync` 拋出且由 `ApiFailureMiddleware` 對應為 HTTP 5xx 的例外，例如儲存失敗、房間忙碌及未預期例外。排除 4xx 與 Client 已取消請求所引發的取消例外。
+  - `pasto.cleanup.failures` 在主資料清理輪次失敗時加一，與 `/health/cleanup` 的 `consecutiveFailures` 採用相同的失敗判定。連線複驗及房碼回收的失敗維持既有 EventId 日誌。
 - Tracing 從 ASP.NET Core 起步，採 W3C Trace Context，正式環境採樣可調。EF Core／Npgsql tracing 另確認需求與重複 span。文件說明 negotiate、WebSocket handshake 與 Hub 方法各自的 trace 範圍，依所選版本驗證。
 - 驗收檢查實際輸出的 `url.path`、`url.query`、`url.full` 等屬性及 SignalR 相關 span，確保無 `access_token` 與實際房碼。核對套件版本的 query 遮蔽，並驗證明確的匯出前清理；metrics 的 `http.route` 使用路由模板。本機驗收須把指標和 trace 實際送到獨立容器的 .NET Aspire Dashboard 並查看，核對 Dashboard 實際接收的 trace 與日誌符合跨階段遮蔽要求，沒有房碼、`access_token`、Credential 或使用者文字。用 `dotnet-counters` 驗證可即時讀取執行中程序的內建 meter 和自訂 meter。日誌收集依既有選型，產品仍由 Serilog 輸出。
 - `dotnet-counters` 與 Aspire Dashboard 只用於開發及 S8 隔離測試。Dashboard 使用固定版本的官方映像，發布的連接埠只綁 `127.0.0.1`，保留內建存取驗證，資料只在記憶體，不需持久化。標準 `deploy/` 啟動不包含 Dashboard。

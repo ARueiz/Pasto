@@ -9,6 +9,13 @@
 - Serilog 仍輸出 Console。驗證時以暫存的 OTLP Protobuf 測試轉送程式，將實際的安全 `6003` Console 事件送入 Dashboard 並讀回，確認測試用敏感文字未出現。首次手動 JSON 轉送未收到確定回應，改用 Protobuf 確認。本次未加入產品日誌 exporter。
 - 暫存版 `dotnet-counters` 10.0.750501 對執行中的 Kestrel 讀得 `http.server.request.duration` 及 `pasto.cleanup.failures`。首次取樣只捕捉自訂指標，於訂閱開始後補發實際請求，第二次取樣成功取得內建 HTTP 指標。專案工具清單與部署 Compose 維持原樣。
 
+### S8 自訂失敗計數語意驗證（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- PostgreSQL 專項回歸 101 通過、0 失敗、0 略過。涵蓋 Telemetry、Room API、Item 寫入、清理與健康探針。新增案例確認 Item 的 400／401／404／409 不計入，儲存失敗與房間忙碌的 503、未預期的 500 各計 1。以中斷房碼回收查詢驗證 `6008` 仍會記錄，單獨發生時不增加計數，與主資料失敗同輪時只增加 1。兩個計數均無 tag。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/metric-semantics-focused.trx`。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore` 完整 PostgreSQL 回歸 321 通過、0 失敗、0 略過，耗時 1 分 23 秒。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/metric-semantics-full.trx`。
+- 本次驗證只涉及計數口徑，Aspire Dashboard 與 `dotnet-counters` 的 smoke test 沿用前一輪紀錄。
+
 ## S6 訂閱追蹤滿載 P2（2026-11-21）
 
 - Release Build 與格式檢查第一次因測試寫法觸發 xUnit2031，改用 `Assert.Single` 的 predicate overload，維持斷言。重跑 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。

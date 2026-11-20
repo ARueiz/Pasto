@@ -112,7 +112,6 @@ internal sealed class RoomCleanupWorker(
         }
         catch (Exception exception)
         {
-            metrics.CleanupFailed();
             logger.LogWarning(failure, "Room lifecycle maintenance will resume next round ({ErrorType})", exception.GetType().Name);
         }
     }
