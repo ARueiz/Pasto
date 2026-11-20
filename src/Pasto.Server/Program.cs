@@ -55,8 +55,11 @@ builder.Services.AddSingleton(services =>
 builder.Services.AddSingleton<IRoomCleanupStore>(services => services.GetRequiredService<RoomCleanupStore>());
 builder.Services.AddSingleton<CleanUpRooms>();
 builder.Services.AddSingleton<RoomConnections>();
+builder.Services.AddSingleton<RoomCleanupStatus>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<RoomCleanupWorker>();
+builder.Services.AddHealthChecks().AddCheck<PostgresReadinessCheck>("postgres",
+    tags: ["ready"], timeout: TimeSpan.FromSeconds(2));
 builder.Services.AddOptions<ApiOptions>().BindConfiguration("Api")
     .Validate(options => options.IsValid(), "API rate limits and trusted proxy IP addresses must be valid.").ValidateOnStart();
 builder.Services.AddOptions<ForwardedHeadersOptions>().Configure<IOptions<ApiOptions>>((options, api) =>
@@ -120,6 +123,7 @@ app.MapRoomCreation();
 app.MapParticipants();
 app.MapRoomStateAndClosure();
 app.MapItems();
+app.MapPastoHealth();
 app.MapHub<RoomHub>(RoomHub.Path).RequireAuthorization();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
