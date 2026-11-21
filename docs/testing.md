@@ -1,5 +1,42 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S7-2 P1 與 P3 審查修正（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~FirstNewLookupMissAfterCooldownImmediatelyReturns120SecondRetry" --logger "trx;LogFileName=s7-2-review-p1-repro.trx"`。真 PostgreSQL 案例重現 1 例失敗，60 秒冷卻後第一個新錯碼預期 429、實際回 404。
+- 修正後 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 回歸執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依下表附加 `--filter`（全套省略）與 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 結果（通過／失敗／略過） | TRX |
+  | --- | --- | --- | --- |
+  | S7-2 專項 | `FullyQualifiedName~PublicJoinAdmissionTests` | 14／0／0 | `s7-2-review-focused.trx` |
+  | S7 第一批專項 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota` | 15／0／0 | `s7-2-review-s7-1-regression.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-2-review-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-2-review-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 347／0／0 | `s7-2-review-full.trx` |
+
+- 專項驗證 20 筆同時期錯碼後的重犯立即回 429／120 秒、保留指紋去重及 300 秒上限。到第 720 秒時最初的 20 筆已過 10 分鐘，測試補滿視窗再確認下次仍為 300 秒。滿載案例驗證表外來源仍可 Join，超過每來源 Join 桶後回 429，並核對 EventId 6103 的節流筆數。預設值案例以同一來源併發建立 30 個不同的 Participant，第 31 筆收到 429 與 `Retry-After`。
+- 這輪修改後端、後端測試與文件，前端 Lint、Build 與 Edge 未重跑。Edge 沿用第一批的 32 例通過結果。
+- 獨立複核確認四項修正與專項 TRX。F1 以最舊指紋汰換保留 20 筆上限，被汰換的房碼在原視窗內可能再次計入。完整 PostgreSQL 回歸由實作方執行。
+
+## S7-2 公開 Join 防護（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 通過，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 使用本機 PostgreSQL 18.6 的 `pasto_test`，每例依既有 fixture 建立隔離 schema。執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依下表附加 `--filter`（全套省略）與 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 結果（通過／失敗／略過） | TRX |
+  | --- | --- | --- | --- |
+  | S7-2 專項 | `FullyQualifiedName~PublicJoinAdmissionTests` | 12／0／0 | `s7-2-focused.trx` |
+  | S7 第一批專項 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota` | 15／0／0 | `s7-2-s7-1-regression.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-2-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-2-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 345／0／0 | `s7-2-full.trx` |
+
+- 專項涵蓋同 NAT 的 30 次相同失效碼、20 筆不同錯碼門檻、IPv6 /64、滾動視窗與退避、冷卻表滿載和每分鐘日誌節流、全站 300 筆計數與兩段恢復、壓力期間已驗證的 REST 和 WebSocket Hub。每房測試以兩個來源送出 30 筆併發 Join，核對獨立 Participant ID、第 31 筆 429、其他房間不受影響及每 2 秒回補一格。另用 `pg_blocking_pids` 證明兩個交易競爭最後一格，並驗證房間已滿、失效、憑證恢復、寫入失敗及提交失敗的計費差異。
+- 初次同 NAT 去重驗收調高既有來源 Join 桶，以單獨驗證冷卻。當時正式預設每來源 burst 仍為 20，後續審查修正將預設調為 30。
+- 首輪 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~PublicJoinAdmissionTests" --logger "trx;LogFileName=s7-2-focused-initial.trx"` 為 10 通過、1 失敗。滿載 Warning 已出現在 Console，測試日誌接收端對 Serilog 轉送的結構欄位數假設錯誤。修正測試收集後，改在測試本體驗證 EventId、層級、彙總訊息與節流。
+- 獨立複核指出冷卻開始時清空集合會讓同一房碼在原 10 分鐘視窗內再次計費。修正後保留各筆首次計時，並驗證冷卻結束後的去重與再犯退避。審查方複核修正並核對專項 TRX；完整 PostgreSQL 回歸由實作方執行。
+- S7-2 只修改後端、後端測試與文件。前端 Lint、Build、Edge 未執行。
+
 ## S7 第一批憑證失敗計費（2026-11-21）
 
 - `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。

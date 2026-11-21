@@ -7,7 +7,7 @@ public sealed class ApiOptions
     public BucketOptions CreatePerIp { get; set; } = new() { TokenLimit = 10, TokensPerPeriod = 30 };
     public BucketOptions CreateGlobal { get; set; } = new() { TokenLimit = 20, TokensPerPeriod = 120 };
     public string[] TrustedProxies { get; set; } = [];
-    public BucketOptions JoinPerIp { get; set; } = new() { TokenLimit = 20, TokensPerPeriod = 120 };
+    public BucketOptions JoinPerIp { get; set; } = new() { TokenLimit = 30, TokensPerPeriod = 120 };
     public BucketOptions JoinGlobal { get; set; } = new() { TokenLimit = 60, TokensPerPeriod = 30, PeriodSeconds = 1 };
     public BucketOptions ReadPerIp { get; set; } = new() { TokenLimit = 1000, TokensPerPeriod = 30000 };
     public BucketOptions ReadGlobal { get; set; } = new() { TokenLimit = 2000, TokensPerPeriod = 60000 };

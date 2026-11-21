@@ -77,7 +77,11 @@ builder.Services.AddRateLimiter(_ => { });
 builder.Services.AddOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>()
     .Configure<IOptions<ApiOptions>>((options, api) => CreationRateLimiting.Configure(options, api.Value));
 builder.Services.AddSingleton<IStorageFailureClassifier, StorageFailureClassifier>();
-builder.Services.AddScoped<IRoomJoinStore, RoomJoinStore>();
+builder.Services.AddSingleton<JoinSourceCooldown>();
+builder.Services.AddSingleton<JoinPressureLimiter>();
+builder.Services.AddSingleton<RoomJoinQuota>();
+builder.Services.AddScoped<IRoomJoinStore>(services => new RoomJoinStore(
+    services.GetRequiredService<IDbContextFactory<PastoDbContext>>(), services.GetRequiredService<RoomJoinQuota>()));
 builder.Services.AddScoped<JoinRoom>();
 builder.Services.AddScoped<IParticipantVerifier, ParticipantVerifier>();
 builder.Services.AddSingleton<ParticipantCredentialFailures>();
@@ -119,8 +123,10 @@ app.UseForwardedHeaders();
 app.UseWebSockets();
 app.Use(RoomHub.CheckOriginAsync);
 app.UseRouting();
+app.UseMiddleware<PublicJoinAdmission>();
 app.UseMiddleware<ParticipantCredentialAdmission>();
 app.UseRateLimiter();
+app.Use(PublicJoinAdmission.ApplyPressureAsync);
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapRoomCreation();

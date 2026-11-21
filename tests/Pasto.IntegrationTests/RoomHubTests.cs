@@ -315,7 +315,7 @@ public sealed class RoomHubTests
     private static Task<CreatedRoom> CreateRoomAsync(PostgresTestDatabase database) =>
         TestRoomCreation.Create(database, new RoomSecrets()).ExecuteAsync();
 
-    private static Task<WebSocket> ConnectAsync(PastoApiFactory factory, string credential, CancellationToken cancellation)
+    internal static Task<WebSocket> ConnectAsync(PastoApiFactory factory, string credential, CancellationToken cancellation)
     {
         var client = factory.Server.CreateWebSocketClient();
         client.ConfigureRequest = request => request.Headers.Origin = "http://localhost";
@@ -331,7 +331,7 @@ public sealed class RoomHubTests
         return await client.SendAsync(request);
     }
 
-    private sealed class HubMessages(WebSocket socket, CancellationToken cancellation)
+    internal sealed class HubMessages(WebSocket socket, CancellationToken cancellation)
     {
         private readonly Queue<string> frames = new();
         private int invocation;
