@@ -18,6 +18,9 @@
 | S6 工作分支 | `feature/s6-room-cleanup`，由包含 S5 合併與交付紀錄的本機 `main` 建立 |
 | S6 第一項提交 | `8e3d1bf`，主資料清理、Worker 收尾及 P3，審查無阻擋問題 |
 | S6 第二項提交 | `a394f3c`，房碼回收、SignalR 連線清理及追蹤滿載 P2，審查無阻擋問題 |
+| S6 合併 | [PR #9](https://github.com/ARueiz/Pasto/pull/9) 已於 2026-11-21 合併至 `main@5ff602d`（Asia/Taipei） |
+| 可觀測性合併 | [PR #10](https://github.com/ARueiz/Pasto/pull/10) 已於 2026-11-21 合併至 `main@6200a96`（Asia/Taipei） |
+| S7 合併 | [PR #11](https://github.com/ARueiz/Pasto/pull/11) 已於 2026-11-21 合併至 `main@cd5b589`（Asia/Taipei） |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -52,7 +55,7 @@
 - [x] Logging：結構化日誌與 Hub 例外。
 - [x] Health Checks：存活、DB 就緒與 Worker 狀態。
 - [x] OpenTelemetry：指標、Tracing 與選配 OTLP。
-- [ ] S7：防護、資源與濫用處理。
+- [x] S7：防護、資源與濫用處理。PR #11 已合併。
   - [x] 啟動盤點。使用者確認 Dev Tunnel 即時同步測試通過。已建立 SignalR、日誌、遙測與受保護 REST 的驗證基線。
   - [x] S7-1 憑證查詢防護：查無憑證才扣來源失敗額度，REST 與 SignalR 共用 DB 保護底線。查無快取讓重複舊憑證直接回 401，跨房 REST 請求扣 Participant 讀取額度。P1 的 F1～F4 複核通過，無新 findings。已提交至 `feature/s7-credential-admission@0811f17`。
   - [x] S7-2 公開加入與猜碼防護。重犯退避、冷卻表滿載與同 NAT 30 人加入的修正已通過複核。
@@ -63,6 +66,8 @@
 - [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
 ## 最新驗證
+
+S7 整合審查修正後，專項 49 例與完整 PostgreSQL 回歸 385 例均通過。前端最近一次 Edge 回歸 44 例通過。 [命令與 TRX](docs/testing.md#s7-整合審查-p3-修正2026-11-21)
 
 S7-4 專項 34 例、前三批專項 43 例、受保護 REST／SignalR／日誌／遙測 144 例、完整 PostgreSQL 374 例與 Edge 44 例均通過。 [命令與 TRX](docs/testing.md#s7-4-http-處理名額與過載重試2026-11-21)
 
@@ -125,7 +130,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S7-1 與 S7-2 已提交，S7-3 已通過複核。下一步先確認 S7-4 的 HTTP 並行、過載 admission 與 partition 上限方案。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#11-s7安全資源與監控整合)
+S7 已合併。下一步是 Deployment，先處理同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose，再進入 S8 壓測。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [Deployment 實作計畫](docs/sprint-1-implementation-plan.md#12-deployment)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
