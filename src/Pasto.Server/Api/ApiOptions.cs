@@ -15,9 +15,12 @@ public sealed class ApiOptions
     public BucketOptions ReadPerParticipant { get; set; } = new() { TokenLimit = 40, TokensPerPeriod = 240 };
     public BucketOptions AddPerParticipant { get; set; } = new() { TokenLimit = 10, TokensPerPeriod = 30 };
     public BucketOptions DeletePerParticipant { get; set; } = new() { TokenLimit = 10, TokensPerPeriod = 60 };
+    public int SourceRateCapacity { get; set; } = 10_000;
+    public int ParticipantRateCapacity { get; set; } = 50_000;
 
     public bool IsValid() => new[] { CreatePerIp, CreateGlobal, JoinPerIp, JoinGlobal, ReadPerIp, ReadGlobal, CredentialFailuresPerSource, ReadPerParticipant, AddPerParticipant, DeletePerParticipant }
         .All(bucket => bucket is not null && bucket.IsValid())
+        && SourceRateCapacity is > 0 and <= 10_000 && ParticipantRateCapacity is > 0 and <= 50_000
         && TrustedProxies is not null && TrustedProxies.All(x => IPAddress.TryParse(x, out _));
 }
 

@@ -3,6 +3,11 @@ using Pasto.Server.Domain;
 
 namespace Pasto.Server.Application.Items;
 
+internal sealed class RoomAddRateLimitedException(int retryAfterSeconds) : Exception("Room add rate exceeded.")
+{
+    internal int RetryAfterSeconds { get; } = retryAfterSeconds;
+}
+
 public sealed class AddItem(IItemAdditionStore store)
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);

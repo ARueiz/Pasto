@@ -62,9 +62,9 @@ internal sealed class RoomHubAdmission(HubConnectionQuota connections, TimeProvi
 }
 
 internal sealed class HubNegotiateAdmission(RequestDelegate next, HubNegotiateLimiter limiter, HubConnectionQuota connections,
-    IOptions<HubAdmissionOptions> options)
+    IOptions<HubAdmissionOptions> options, HttpWorkAdmission admission)
 {
-    public Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context)
     {
         var metadata = context.GetEndpoint()?.Metadata;
         if (HttpMethods.IsPost(context.Request.Method) && metadata?.GetMetadata<NegotiateMetadata>() is not null &&
@@ -72,14 +72,33 @@ internal sealed class HubNegotiateAdmission(RequestDelegate next, HubNegotiateLi
             context.User.Identity?.IsAuthenticated == true)
         {
             var source = CreationRateLimiting.IpKey(context);
+            using var lease = admission.TryAcquire(HttpWork.ReadDelete, source, out var workRetry);
+            if (lease is null)
+            {
+                await HttpWorkAdmission.Reject(context, workRetry).ExecuteAsync(context);
+                return;
+            }
+            context.Response.OnStarting(() =>
+            {
+                lease.Dispose();
+                return Task.CompletedTask;
+            });
             if (limiter.Check(source) is int retryAfter)
-                return RejectAsync(context, retryAfter, "RateLimited", "hub_negotiate");
+            {
+                await RejectAsync(context, retryAfter, "RateLimited", "hub_negotiate");
+                return;
+            }
 
             var identity = ParticipantAuthenticationHandler.Identity(context.User);
             if (!connections.HasCapacity(source, identity))
-                return RejectAsync(context, options.Value.ClientTimeoutSeconds, RoomHubAdmission.ConnectionLimitCode, "hub_connections");
+            {
+                await RejectAsync(context, options.Value.ClientTimeoutSeconds, RoomHubAdmission.ConnectionLimitCode, "hub_connections");
+                return;
+            }
+            await next(context);
+            return;
         }
-        return next(context);
+        await next(context);
     }
 
     private static Task RejectAsync(HttpContext context, int retryAfter, string code, string reason)

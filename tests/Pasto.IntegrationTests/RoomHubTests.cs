@@ -368,6 +368,8 @@ public sealed class RoomHubTests
             Assert.Empty((await ReadAsync()).EnumerateObject());
         }
 
+        internal Task PingAsync() => SendAsync(new { type = 6 });
+
         public async Task<JsonElement> SubscribeAsync(Guid roomId)
         {
             var invocationId = await StartSubscribeAsync(roomId);

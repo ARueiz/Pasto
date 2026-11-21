@@ -1,5 +1,22 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S7-4 HTTP 處理名額與過載重試（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。首輪格式檢查指出新增測試的初始化器須換行，修正後通過。
+- 使用本機 PostgreSQL 與各測試的隔離 schema。後端回歸執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依下表附加 `--filter`（全套省略）及 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 通過／失敗／略過 | TRX |
+  | --- | --- | --- | --- |
+  | S7-4 專項與 30 人回歸 | `FullyQualifiedName~HttpWorkAdmissionTests\|FullyQualifiedName~PublicJoinAdmissionTests\|FullyQualifiedName~RequestBodyLimitTests` | 34／0／0 | `s7-4-focused.trx` |
+  | S7-1、S7-2、S7-3 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota\|FullyQualifiedName~PublicJoinAdmissionTests\|FullyQualifiedName~HubAdmissionTests` | 43／0／0 | `s7-4-prior-admission.trx` |
+  | 受保護 REST、SignalR、日誌、遙測 | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests\|FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 144／0／0 | `s7-4-rest-hub-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 374／0／0 | `s7-4-full.trx` |
+
+- 真 Kestrel 測試把一筆 Join 的 JSON 保持在未上傳完的狀態，並讓另一筆 Join 成功。另用小接收緩衝的 TCP client 停止讀取一份 300 筆 × 8 KiB 控制字元的快照，期間另一筆同類 metadata 讀取仍成功。這兩個測試使用分類名額 1，驗證上傳綁定及回應傳輸不會占住處理名額。
+- 真 Kestrel 的 WebSocket 驗證使用正式 8 KiB/s、寬限 15 秒設定。協商並訂閱後，連線 32 秒只有 SignalR keepalive，接著成功收到實際新增文字的 `RoomChanged`。
+- PostgreSQL 同 NAT 30 人驗收使用正式預設配額，在第一批 8 筆到達 DB 前固定佔住名額。首輪其餘 22 筆全部回 `503 Overloaded`、`Retry-After: 1`，且資料庫當時只有房主。其他來源仍能加入另一房。解除阻擋後，依相同的退避規則重試，30 個新身分均成功。另以 Edge 直接執行前端 API，使用模擬的 8 名額 HTTP gate 證明 30 次加入全可在三輪重試內成功。
+- 在 `src/Pasto.Client` 執行 `npm.cmd run lint`、`npm.cmd run build` 及 `npm.cmd run test:ui -- --workers=1 --reporter=line`，均通過。完整 Edge 44 例含 6 個新增案例，驗證退避、三次上限、離頁取消、草稿保留及 `ServiceUnavailable` 不自動重送。
+
 ## S7-3 P2 與 P3 審查修正（2026-11-21）
 
 - 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~WebSocketWithoutNegotiatedIdIsRejectedWithoutOccupyingCapacity" --logger "trx;LogFileName=s7-3-review-p2-repro.trx"`。真 PostgreSQL 案例重現 1 例失敗，缺少 `id` 的 WebSocket 仍成功升級。

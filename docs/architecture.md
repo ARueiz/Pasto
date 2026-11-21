@@ -132,6 +132,8 @@ ProblemDetails 含 code／correlationId，不含內容、Credential 或 stack tr
 
 協商的 `429 RateLimited`（協商速率）與 `429 HubConnectionLimitReached`（連線名額）均帶 `Cache-Control: no-store`、`Retry-After`，並在 ProblemDetails body 的 `retryAfterSeconds` 提供相同的整數秒數，供 SignalR 前端讀取。
 
+`503 Overloaded` 在 handler 執行前回應，帶 `Retry-After`、相同秒數的 `retryAfterSeconds` 及 `Cache-Control: no-store`。Client 只有在建房、Join 或新增文字收到此代碼時，才依 `Retry-After` 加最多 500 ms 隨機延遲自動重試最多三次。耗盡後顯示忙碌並保留輸入，使用者在期限後可手動重試。
+
 ## 5. 交易、鎖與期限
 
 建房在一個 transaction 寫保留碼、Rooms（ExpiresAt = CreatedAt + 5 小時）與房主；UNIQUE 衝突回滾再重產碼，有界重試候選 5 次、耗盡回 503，不先 SELECT 空碼就當作取得。重試上限可設定／監控，不揭露其他房間。
@@ -219,9 +221,21 @@ Worker 只有 now ≥ ReusableAfter 且無 Rooms 引用才刪保留碼；FK 防�
 
 已驗證 Participant／RoomId 的配額依入口設定，來源只用於容量保護。單一 NAT 最多持有 30 條 Hub 連線，額外的 Client 依 REST 輪詢。S8 分開量測分散來源的 1,000 條 Hub 連線、同 NAT 的 REST 回退，以及千人全新公開加入的暖機。
 
-避免任意 Code／無效 Credential 建立 partition。鍵使用固定全站鍵、可信來源前綴或已驗證內部 ID，鍵數及 TTL 有界。一般配額滿載時新鍵使用保守共用桶，驗證前的憑證失敗來源表滿載時新來源退回 DB 保護底線。只信任已配置 Reverse Proxy allowlist 的 forwarded headers，不讓 Client 自填 X-Forwarded-For。[ASP.NET Core rate limiting](https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit?view=aspnetcore-10.0)
+配額鍵使用固定全站鍵、可信來源前綴或已驗證內部 ID。來源速率滿載時，表外來源使用對應全站桶。Participant 表滿載時，表外身分沿用 DB 底線、適用的每房額度與 HTTP 處理上限，每程序每 60 秒最多記錄一次節流警告。只信任已配置 Reverse Proxy allowlist 的 forwarded headers。
 
 HTTP limiter 不涵蓋每次 Hub invocation；`SubscribeRoom` 在 DB 查詢前依連線限頻，並保留 RoomId 與期限檢查。常駐 WebSocket 有獨立連線預算。協商在憑證驗證成功後才計入已驗證速率；缺少和格式錯誤的憑證直接回 401，其他無效憑證沿用 S7-1 的失敗計費及 DB 保護底線。
+
+REST endpoint filter 在參數綁定與憑證驗證後取得處理名額，產出 `IResult` 後釋放，框架之後再序列化與寫出回應。建房／Join 的速率桶則在取得處理名額後扣額，避免 `Overloaded` 重試重複扣費。negotiate 在驗證後取得讀取類名額，於 `OnStarting` 釋放，例外或取消時由同一份可重複呼叫的 lease 保底。WebSocket 升級請求全程使用憑證底線、先前協商與專用 Hub 配額。in-flight 的來源狀態隨最後一筆工作結束移除；來源表滿載時，表外來源仍受全站與分類上限。
+
+| 資源 | 現有機制與訊號 | 503 |
+| --- | --- | --- |
+| HTTP 處理中 | 真實全站、分類與來源計數，及全站高／低水位遲滯 | 超限或暫停建房／加入時回 `Overloaded` |
+| DB pool | 既有 pool 上限與 DB 錯誤處理，等待量未接至 admission | 實際儲存失敗回 `ServiceUnavailable`，pool 等待水位留 Deployment |
+| 程序／容器記憶體 | 尚未接水位訊號，慢速快照記憶體留 S8 量測 | 記憶體觸發規則留 Deployment |
+| CPU | 尚未接水位訊號 | CPU 觸發規則留 Deployment |
+| 磁碟 | 尚未接水位訊號 | 磁碟觸發規則留 Deployment |
+
+過載判定以請求取得、釋放名額的事件為準，使用單調時鐘。進入條件為計數至少 80 持續 2 秒，恢復條件為低於 64 持續 10 秒。期間只要有一次事件觀察到計數離開對應範圍，該次計時就重來。沒有請求進出事件時，下一次事件才評估是否已達持續時間。
 
 每房 Participant 生命週期候選上限 1,000 筆，在 Room 鎖內檢查；不用 beforeunload 清列，不刪還被 Owner／Creator 引用的 Participant，原憑證恢復不算新名額。此為資料預算，不是在線人數。
 

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { ApiError, api, invalidRoom } from './api';
+import { ApiError, api, invalidRoom, isOverloaded } from './api';
 import type { Item, RoomSession } from './api';
 import { useRoomSync } from './useRoomSync';
 import { useRoomScroll } from './useRoomScroll';
+import { useOverloadWait } from './useOverloadWait';
 import { Button, ConfirmDialog, CopyFallback, ErrorNotice, Icon, Logo, StatusNotice, ThemeOptions } from './ui';
 import type { Theme } from './ui';
 
@@ -60,6 +61,8 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   const { snapshot, status, error: syncError, refresh, stop } = useRoomSync(session, invalidate);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ value: unknown; uncertain: boolean }>();
+  const [sendOverload, setSendOverload] = useState<ApiError>();
+  const waitingToSend = useOverloadWait(sendOverload);
   const [qr, setQr] = useState(false);
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState('');
@@ -159,12 +162,15 @@ export function Room({ session, saved, theme, onTheme, onLeave, onInvalid }: {
   const bytes = byteCount.encode(draft).length;
   const over = bytes > maxBytes;
   const canWrite = !pending;
-  const canSend = canWrite && !!draft.trim() && !over;
+  const canSend = canWrite && !waitingToSend && !!draft.trim() && !over;
 
   function send() {
     if (!canSend) return;
     void run(async signal => {
-      const { committedVersion } = await api.add(session, draft, signal);
+      const { committedVersion } = await api.add(session, draft, signal).catch(error => {
+        if (!signal.aborted && isOverloaded(error)) setSendOverload(error);
+        throw error;
+      });
       if (signal.aborted) return;
       setDraft('');
       scrollAfterSend(committedVersion);

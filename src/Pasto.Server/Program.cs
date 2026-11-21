@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Pasto.Server.Api;
@@ -19,7 +20,12 @@ builder.Services.AddSerilog((_, logger) => ServerLogging.Configure(builder.Confi
     preserveStaticLogger: true, writeToProviders: true);
 builder.AddPastoTelemetry();
 // 在 JSON 綁定／字串配置前由 Kestrel 限制實際 body bytes，包含未知長度的串流。
-builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 32 * 1024);
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 32 * 1024;
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(10);
+    options.Limits.MinResponseDataRate = new MinDataRate(8 * 1024, TimeSpan.FromSeconds(15));
+});
 
 // 連線由環境變數 ConnectionStrings__Pasto 或 .NET configuration 提供；不在 repo 保存密碼。
 // Compose 的 .env 只供 Compose 使用，不會自動匯入 ASP.NET Core 的設定。
@@ -77,9 +83,10 @@ builder.Services.AddOptions<ForwardedHeadersOptions>().Configure<IOptions<ApiOpt
     options.ForwardLimit = 1;
     foreach (var proxy in api.Value.TrustedProxies) options.KnownProxies.Add(System.Net.IPAddress.Parse(proxy));
 });
-builder.Services.AddRateLimiter(_ => { });
-builder.Services.AddOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>()
-    .Configure<IOptions<ApiOptions>>((options, api) => CreationRateLimiting.Configure(options, api.Value));
+builder.Services.AddOptions<HttpWorkOptions>().BindConfiguration("Api:HttpWork")
+    .Validate(options => options.IsValid(), "HTTP work limits and overload thresholds must be valid.").ValidateOnStart();
+builder.Services.AddSingleton<HttpWorkAdmission>();
+builder.Services.AddSingleton<SourceRateLimits>();
 builder.Services.AddSingleton<IStorageFailureClassifier, StorageFailureClassifier>();
 builder.Services.AddSingleton<JoinSourceCooldown>();
 builder.Services.AddSingleton<JoinPressureLimiter>();
@@ -93,8 +100,7 @@ builder.Services.AddScoped<IParticipantRecoveryStore, ParticipantRecoveryStore>(
 builder.Services.AddScoped<GetParticipant>();
 builder.Services.AddScoped<IRoomStateStore, RoomStateStore>();
 builder.Services.AddScoped<GetRoomState>();
-builder.Services.AddSingleton<ParticipantReadLimiter>();
-builder.Services.AddSingleton<ParticipantWriteLimiter>();
+builder.Services.AddSingleton<ParticipantRateLimits>();
 builder.Services.AddAuthentication(ParticipantAuthenticationHandler.SchemeName)
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ParticipantAuthenticationHandler>(
         ParticipantAuthenticationHandler.SchemeName, _ => { });
@@ -120,7 +126,9 @@ builder.Services.AddOptions<CreateRoomOptions>()
 builder.Services.AddSingleton<IRoomSecrets, RoomSecrets>();
 builder.Services.AddScoped<IRoomCreationStore, RoomCreationStore>();
 builder.Services.AddScoped<CreateRoom>();
-builder.Services.AddScoped<IItemAdditionStore, ItemAdditionStore>();
+builder.Services.AddSingleton<RoomAddQuota>();
+builder.Services.AddScoped<IItemAdditionStore>(services => new ItemAdditionStore(
+    services.GetRequiredService<IDbContextFactory<PastoDbContext>>(), services.GetRequiredService<RoomAddQuota>()));
 builder.Services.AddScoped<AddItem>();
 builder.Services.AddScoped<IItemSnapshotStore, ItemSnapshotStore>();
 builder.Services.AddScoped<GetItemSnapshot>();
@@ -139,9 +147,9 @@ app.UseWebSockets();
 app.UseRouting();
 app.Use(RoomHub.CheckRequestAsync);
 app.UseMiddleware<PublicJoinAdmission>();
+app.Use(HttpWorkEndpoints.LimitPublicBodyAsync);
 app.UseMiddleware<ParticipantCredentialAdmission>();
-app.UseRateLimiter();
-app.Use(PublicJoinAdmission.ApplyPressureAsync);
+app.Use(SourceRateLimits.CheckDatabaseAsync);
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<HubNegotiateAdmission>();

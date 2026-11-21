@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Net;
@@ -267,15 +268,50 @@ public sealed class PublicJoinAdmissionTests
     }
 
     [Fact]
-    public async Task DefaultJoinBucketsAllowThirtyConcurrentParticipantsFromOneSource()
+    public async Task DefaultJoinBucketsAllowThirtyParticipantsFromOneSourceWithOverloadRetry()
     {
         await using var db = await PostgresTestDatabase.CreateAsync();
         var room = await CreateRoomAsync(db, "OPEN01");
-        await using var factory = Factory(db, new ManualClock());
+        var otherRoom = await CreateRoomAsync(db, "OPEN02");
+        var hold = new HoldFirstJoinChecks();
+        await using var factory = Factory(db, new ManualClock(),
+            services => services.AddDbContextFactory<PastoDbContext>(options => options.AddInterceptors(hold)));
         using var client = Client(factory, SourceA);
-        await AssertDistinctJoinsAsync(Enumerable.Range(0, 30).Select(_ =>
-            client.PostAsJsonAsync(JoinPath, new { code = room.Code })));
+        using var otherSource = Client(factory, SourceB);
+        var started = Enumerable.Range(0, 8).Select(_ => client.PostAsJsonAsync(JoinPath, new { code = room.Code })).ToArray();
+        try
+        {
+            await hold.AllEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(Enumerable.Range(0, 22).Select(_ => ExpectJoinAsync(client, room.Code, 503, "Overloaded", 1)));
+            await using var context = db.CreateContext();
+            Assert.Equal(1, await context.Participants.CountAsync(participant => participant.RoomId == room.RoomId));
+            await ExpectJoinAsync(otherSource, otherRoom.Code, 201);
+        }
+        finally
+        {
+            hold.Release.TrySetResult();
+        }
+        await AssertDistinctJoinsAsync(started);
+        await AssertDistinctJoinsAsync(Enumerable.Range(0, 22).Select(RetryOverloadAsync));
+        await using var verification = db.CreateContext();
+        Assert.Equal(31, await verification.Participants.CountAsync(participant => participant.RoomId == room.RoomId));
         await ExpectJoinAsync(client, room.Code, 429, "RateLimited");
+
+        async Task<HttpResponseMessage> RetryOverloadAsync(int index)
+        {
+            var jitter = new Random(index);
+            for (var attempt = 1; ; attempt++)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1) + TimeSpan.FromMilliseconds(jitter.Next(500)));
+                var result = await client.PostAsJsonAsync(JoinPath, new { code = room.Code });
+                if (result.StatusCode != HttpStatusCode.ServiceUnavailable || attempt == 3) return result;
+                using (result)
+                {
+                    Assert.Equal(TimeSpan.FromSeconds(1), result.Headers.RetryAfter?.Delta);
+                    Assert.Equal("Overloaded", (await result.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+                }
+            }
+        }
     }
 
     [Fact]
@@ -285,7 +321,11 @@ public sealed class PublicJoinAdmissionTests
         var room = await CreateRoomAsync(db, "OPEN01");
         var other = await CreateRoomAsync(db, "OPEN02");
         var clock = new ManualClock();
-        await using var factory = Factory(db, clock);
+        await using var factory = Factory(db, clock, services => services.Configure<HttpWorkOptions>(options =>
+        {
+            options.JoinLimit = 48;
+            options.JoinPerSource = 30;
+        }));
         using var first = Client(factory, SourceA);
         using var second = Client(factory, SourceB);
         await AssertDistinctJoinsAsync(Enumerable.Range(0, 30).Select(index =>
@@ -546,6 +586,25 @@ public sealed class PublicJoinAdmissionTests
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() => Interlocked.Read(ref timestamp);
         internal void Advance(TimeSpan duration) => Interlocked.Add(ref timestamp, duration.Ticks);
+    }
+
+    private sealed class HoldFirstJoinChecks : DbCommandInterceptor
+    {
+        private int arrivals;
+        internal TaskCompletionSource AllEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
+            {
+                var current = Interlocked.Increment(ref arrivals);
+                if (current == 8) AllEntered.TrySetResult();
+                if (current <= 8) await Release.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+            }
+            return result;
+        }
     }
 
     private sealed class CapacityLog : ILoggerProvider, ILogger

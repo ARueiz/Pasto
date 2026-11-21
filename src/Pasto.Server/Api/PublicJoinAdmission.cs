@@ -11,26 +11,19 @@ internal sealed class PublicJoinAdmission(RequestDelegate next, JoinSourceCooldo
     {
         if (IsJoin(context) && cooldown.Check(CreationRateLimiting.IpKey(context)) is int seconds)
         {
-            await RejectAsync(context, seconds, "join_source_cooldown");
+            await Rejection(context, seconds, "join_source_cooldown").ExecuteAsync(context);
             return;
         }
         await next(context);
     }
 
-    internal static Task ApplyPressureAsync(HttpContext context, RequestDelegate next)
-    {
-        if (IsJoin(context) && context.RequestServices.GetRequiredService<JoinPressureLimiter>().Check() is int seconds)
-            return RejectAsync(context, seconds, "join_pressure");
-        return next(context);
-    }
-
     private static bool IsJoin(HttpContext context)
         => context.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == ParticipantEndpoints.JoinName;
 
-    internal static Task RejectAsync(HttpContext context, int seconds, string reason)
+    internal static IResult Rejection(HttpContext context, int seconds, string reason)
     {
         context.Features.Get<IHttpMetricsTagsFeature>()?.Tags.Add(new("pasto.rate_limit.reason", reason));
-        return CreationRateLimiting.RejectAsync(context, seconds, "RateLimited");
+        return CreationRateLimiting.Rejection(context, seconds, "RateLimited");
     }
 }
 

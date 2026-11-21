@@ -57,12 +57,14 @@
   - [x] S7-1 憑證查詢防護：查無憑證才扣來源失敗額度，REST 與 SignalR 共用 DB 保護底線。查無快取讓重複舊憑證直接回 401，跨房 REST 請求扣 Participant 讀取額度。P1 的 F1～F4 複核通過，無新 findings。已提交至 `feature/s7-credential-admission@0811f17`。
   - [x] S7-2 公開加入與猜碼防護。重犯退避、冷卻表滿載與同 NAT 30 人加入的修正已通過複核。
   - [x] S7-3 SignalR 常駐連線配額、negotiate 速率與 `SubscribeRoom` 限流。WebSocket 強制使用協商取得的 token，Origin 驗收與獨立複核通過。
-  - [ ] S7-4 HTTP 並行、過載 admission 與 partition 上限。
+  - [x] S7-4 HTTP 並行、過載 admission 與 partition 上限。慢速 I/O、同 NAT 30 人重試及 WebSocket 閒置驗收已通過。
 - [ ] Deployment：同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose。
 - [ ] S8：壓測與收尾。
 - [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
 ## 最新驗證
+
+S7-4 專項 34 例、前三批專項 43 例、受保護 REST／SignalR／日誌／遙測 144 例、完整 PostgreSQL 374 例與 Edge 44 例均通過。 [命令與 TRX](docs/testing.md#s7-4-http-處理名額與過載重試2026-11-21)
 
 S7-3 審查修正後，專項 14 例、前兩批 29 例、受保護 REST 122 例、SignalR／日誌／遙測 22 例及完整 PostgreSQL 回歸 361 例均通過。沿用上一輪 Edge 38 例。 [命令與 TRX](docs/testing.md#s7-3-p2-與-p3-審查修正2026-11-21)
 
@@ -134,7 +136,8 @@ S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非�
 - S7：交付並驗證全站 SignalR 連線配額、每個 Participant 3 條連線，以及正式反向代理的 token 遮蔽。S6 的 1,500 條上限只限制追蹤表記憶體，滿載仍可訂閱。正式反向代理另依 Deployment 計畫交付。
 - 後續可評估作者代碼撞碼處理。目前接受五碼相同的作者在連續顯示時可能被分在同組。
 - S7／S8：同 NAT 共用失敗額度、跨房請求扣自身讀取額度。大量 /64 或在途併發仍可耗盡全站 DB 保護底線。查無快取與來源失敗桶已限量，既有框架 partition 的記憶體峰值與重連尖峰留待 S8 量測。 [第一批風險](docs/s2-api-identity.md#s7-第一批失敗計費)
-- S7-4：驗證前以來源分組的 DB 底線、建房、加入桶達 partition 上限時，新來源只受各自的全站桶約束。驗證後以 Participant ID 為鍵的桶達上限時，新鍵使用保守共用桶。
+- S7-4：DB 底線、建房及 Join 的來源速率桶共 10,000，已驗證 negotiate 的來源表 5,000，滿載時表外來源走各自的全站桶。Participant 表上限 50,000 個 ID，滿載時新身分沿用適用的 DB 底線、每房配額與 in-flight，並記錄節流警告。
+- S7-4／S8：快照寫出前已釋放 HTTP 處理名額，慢讀仍可能占用記憶體。S8 量測約 14.8 MB 最大回應情境的程序與代理記憶體峰值。
 - S7：持有分享連結者可反覆 Join 耗盡 1,000 個生命週期 Participant 名額。
 - S7-2／S8：攻擊者以大量 /64 輪流送錯碼，可在恢復期反覆觸發壓力，使全站長期處於壓力模式。壓力期間若攻擊者持續送出每秒 2 次以上的請求，大部分合法 Join 會被拒，使用者需要重試。S8 量測壓力模式下合法 Join 的成功率與延遲。
 - S7／S8：實測以控制字元填滿 300 筆時的 JSON 回應大小與讀取頻寬。S8 另測 1,000 條連線同時重抓。
