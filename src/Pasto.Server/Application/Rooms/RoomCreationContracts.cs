@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Pasto.Server.Domain;
 
 namespace Pasto.Server.Application.Rooms;
@@ -20,6 +22,11 @@ public sealed class ParticipantCredential(string value, byte[] hash)
 {
     public string Value { get; } = value;
     public byte[] Hash { get; } = hash;
+
+    internal static bool HasValidFormat(string value) => value.Length == 22 &&
+        value.All(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_');
+
+    internal static byte[] HashValue(string value) => SHA256.HashData(Encoding.UTF8.GetBytes(value));
 }
 
 public sealed class CreatedRoom(Room room, string credential)

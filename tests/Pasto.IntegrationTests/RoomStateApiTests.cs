@@ -79,7 +79,7 @@ public sealed class RoomStateApiTests
     [InlineData("DELETE", "invalid")]
     [InlineData("DELETE", "crossExists")]
     [InlineData("DELETE", "crossMissing")]
-    public async Task InvalidOrForeignCredential_Is401BeforeTargetStore(string method, string kind)
+    public async Task InvalidOrForeignCredential_IsRejectedBeforeTargetStore(string method, string kind)
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         var room = await CreateRoomAsync(database);
@@ -96,8 +96,9 @@ public sealed class RoomStateApiTests
         using var client = factory.CreateClient();
         using var response = await SendAsync(client, new HttpMethod(method), target,
             kind == "missing" ? null : kind == "invalid" ? "bad" : room.Credential);
-        await AssertProblemAsync(response, 401, "ParticipantUnauthorized");
-        Assert.Contains(response.Headers.WwwAuthenticate, header => header.Scheme == "Bearer");
+        var crossRoom = kind.StartsWith("cross", StringComparison.Ordinal);
+        await AssertProblemAsync(response, crossRoom ? 403 : 401, "ParticipantUnauthorized");
+        Assert.Equal(!crossRoom, response.Headers.WwwAuthenticate.Any(header => header.Scheme == "Bearer"));
     }
 
     [Theory]
@@ -230,7 +231,7 @@ public sealed class RoomStateApiTests
                 context.Connection.RemoteIpAddress = IPAddress.Parse(ip);
                 context.Request.Method = verb;
                 context.Request.Path = path;
-                context.Request.Headers.Authorization = $"Bearer {new string('A', 22)}";
+                context.Request.Headers.Authorization = $"Bearer {new string(path.EndsWith("/me") ? 'A' : 'B', 22)}";
             });
             Assert.Equal("no-store", response.Response.Headers.CacheControl);
             if (response.Response.StatusCode == 429) Assert.False(string.IsNullOrWhiteSpace(response.Response.Headers.RetryAfter));
@@ -394,7 +395,7 @@ public sealed class RoomStateApiTests
     private sealed class CountingVerifier : IParticipantVerifier
     {
         public int Calls { get; private set; }
-        public Task<ParticipantIdentity?> VerifyAsync(string credential, CancellationToken cancellationToken)
+        public Task<ParticipantIdentity?> VerifyAsync(byte[] credentialHash, CancellationToken cancellationToken)
         {
             Calls++;
             return Task.FromResult<ParticipantIdentity?>(null);
@@ -404,9 +405,9 @@ public sealed class RoomStateApiTests
     {
         public TaskCompletionSource Verified { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public async Task<ParticipantIdentity?> VerifyAsync(string credential, CancellationToken cancellationToken)
+        public async Task<ParticipantIdentity?> VerifyAsync(byte[] credentialHash, CancellationToken cancellationToken)
         {
-            var identity = await actual.VerifyAsync(credential, cancellationToken);
+            var identity = await actual.VerifyAsync(credentialHash, cancellationToken);
             Assert.NotNull(identity);
             Verified.TrySetResult();
             await Release.Task.WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);

@@ -32,7 +32,8 @@ internal static class ServerTelemetry
                 metrics.AddMeter(ServerMetrics.MeterName, "Microsoft.AspNetCore.Hosting", "Microsoft.AspNetCore.Http.Connections")
                     .AddView("http.server.request.duration", new MetricStreamConfiguration
                     {
-                        TagKeys = ["http.request.method", "http.response.status_code", "http.route"]
+                        TagKeys = ["http.request.method", "http.response.status_code", "http.route",
+                            "pasto.rate_limit.reason", "pasto.admission.reason"]
                     })
                     .AddView("signalr.server.active_connections", new MetricStreamConfiguration
                     {

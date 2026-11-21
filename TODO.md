@@ -53,11 +53,28 @@
 - [x] Health Checks：存活、DB 就緒與 Worker 狀態。
 - [x] OpenTelemetry：指標、Tracing 與選配 OTLP。
 - [ ] S7：防護、資源與濫用處理。
+  - [x] 啟動盤點。使用者確認 Dev Tunnel 即時同步測試通過。已建立 SignalR、日誌、遙測與受保護 REST 的驗證基線。
+  - [x] S7-1 憑證查詢防護：查無憑證才扣來源失敗額度，REST 與 SignalR 共用 DB 保護底線。查無快取讓重複舊憑證直接回 401，跨房 REST 請求扣 Participant 讀取額度。P1 的 F1～F4 複核通過，無新 findings。已提交至 `feature/s7-credential-admission@0811f17`。
+  - [x] S7-2 公開加入與猜碼防護。重犯退避、冷卻表滿載與同 NAT 30 人加入的修正已通過複核。
+  - [x] S7-3 SignalR 常駐連線配額、negotiate 速率與 `SubscribeRoom` 限流。WebSocket 強制使用協商取得的 token，Origin 驗收與獨立複核通過。
+  - [x] S7-4 HTTP 並行、過載 admission 與 partition 上限。慢速 I/O、同 NAT 30 人重試及 WebSocket 閒置驗收已通過。
 - [ ] Deployment：同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose。
 - [ ] S8：壓測與收尾。
 - [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
 ## 最新驗證
+
+S7-4 專項 34 例、前三批專項 43 例、受保護 REST／SignalR／日誌／遙測 144 例、完整 PostgreSQL 374 例與 Edge 44 例均通過。 [命令與 TRX](docs/testing.md#s7-4-http-處理名額與過載重試2026-11-21)
+
+S7-3 審查修正後，專項 14 例、前兩批 29 例、受保護 REST 122 例、SignalR／日誌／遙測 22 例及完整 PostgreSQL 回歸 361 例均通過。沿用上一輪 Edge 38 例。 [命令與 TRX](docs/testing.md#s7-3-p2-與-p3-審查修正2026-11-21)
+
+S7-2 審查修正後，專項 14 例、S7 第一批 15 例、受保護 REST 122 例、SignalR／日誌／遙測 22 例及完整 PostgreSQL 回歸 347 例均通過。 [命令與 TRX](docs/testing.md#s7-2-p1-與-p3-審查修正2026-11-21)
+
+S7 第一批 P1 修正後，專項 15 例、受保護 REST 122 例、SignalR／日誌／遙測 22 例、完整 PostgreSQL 回歸 333 例均通過。前端沿用上一輪 Edge 32 例。 [重現、命令與 TRX](docs/testing.md#s7-第一批-p1-審查修正2026-11-21)
+
+S7 第一批完整 PostgreSQL 回歸 332 例與 Edge 32 例通過。受保護 REST 122 例、SignalR／日誌／遙測 22 例及第一批專項 14 例均通過。 [命令與 TRX](docs/testing.md#s7-第一批憑證失敗計費2026-11-21)
+
+S7 啟動基線：Release 建置與格式檢查通過。SignalR、日誌與遙測 22 例，受保護 REST 122 例，均通過且無失敗或略過。TRX 為 `s7-kickoff-baseline.trx` 與 `s7-rest-baseline.trx`。
 
 Logging、Health Checks 與 OpenTelemetry 已在 `feature/observability` 驗證。完整 PostgreSQL 回歸 313 例通過；另驗證獨立 Aspire Dashboard 回讀 OTLP 及 `dotnet-counters` 即時指標。 [測試紀錄](docs/testing.md#logginghealth-checks-與-opentelemetry2026-11-21)
 
@@ -108,7 +125,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S6 已在 `feature/s6-room-cleanup` 完成，文件批次 `f3e5352` 的審查修正已補齊。Logging、Health Checks 與 OpenTelemetry 已在 `feature/observability` 驗證，下一階段為 S7 防護。各階段合併至 `main` 後依 AGENTS.md §10 更新 README 進度表。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#11-s7安全資源與監控整合)
+S7-1 與 S7-2 已提交，S7-3 已通過複核。下一步先確認 S7-4 的 HTTP 並行、過載 admission 與 partition 上限方案。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#11-s7安全資源與監控整合)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
@@ -116,10 +133,13 @@ S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非�
 
 - S6 第二項非阻擋 P3：`6009 RoomConnectionTrackingFull` 目前隨清理 Worker 彙總。停用 Worker 時沒有摘要。後續確認是否需要與 Worker 狀態獨立的有界摘要，保留每期間最多一筆的日誌節流。
 
-- S7：交付並驗證全站 SignalR 連線配額、每個 Participant 3 條連線，以及 Hub 協商防護、日誌 token 遮蔽與正式反向代理。S6 的 1,500 條上限只限制追蹤表記憶體，滿載仍可訂閱，不能取代 S7 的連線配額。
+- S7：交付並驗證全站 SignalR 連線配額、每個 Participant 3 條連線，以及正式反向代理的 token 遮蔽。S6 的 1,500 條上限只限制追蹤表記憶體，滿載仍可訂閱。正式反向代理另依 Deployment 計畫交付。
 - 後續可評估作者代碼撞碼處理。目前接受五碼相同的作者在連續顯示時可能被分在同組。
-- S7：少數來源可耗盡共用的驗證前 read admission，影響讀取，也會阻擋新增文字、刪除文字與關房。Participant 寫入配額不會緩解此入口風險。
+- S7／S8：同 NAT 共用失敗額度、跨房請求扣自身讀取額度。大量 /64 或在途併發仍可耗盡全站 DB 保護底線。查無快取與來源失敗桶已限量，既有框架 partition 的記憶體峰值與重連尖峰留待 S8 量測。 [第一批風險](docs/s2-api-identity.md#s7-第一批失敗計費)
+- S7-4：DB 底線、建房及 Join 的來源速率桶共 10,000，已驗證 negotiate 的來源表 5,000，滿載時表外來源走各自的全站桶。Participant 表上限 50,000 個 ID，滿載時新身分沿用適用的 DB 底線、每房配額與 in-flight，並記錄節流警告。
+- S7-4／S8：快照寫出前已釋放 HTTP 處理名額，慢讀仍可能占用記憶體。S8 量測約 14.8 MB 最大回應情境的程序與代理記憶體峰值。
 - S7：持有分享連結者可反覆 Join 耗盡 1,000 個生命週期 Participant 名額。
+- S7-2／S8：攻擊者以大量 /64 輪流送錯碼，可在恢復期反覆觸發壓力，使全站長期處於壓力模式。壓力期間若攻擊者持續送出每秒 2 次以上的請求，大部分合法 Join 會被拒，使用者需要重試。S8 量測壓力模式下合法 Join 的成功率與延遲。
 - S7／S8：實測以控制字元填滿 300 筆時的 JSON 回應大小與讀取頻寬。S8 另測 1,000 條連線同時重抓。
 - **S7 防護完成前不得公開部署**。任何不受信任的裝置或使用者可連線的環境都算公開部署，包括可由訪客 Wi-Fi 或 BYOD 存取的內網。受信任內網仍需驗證、限流與敏感資料保護。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md)
 - S4 P3：在選單按 Esc，或用 Esc 取消確認對話框之後，焦點會掉到 `<body>`。建議把焦點還給「更多選項」按鈕。

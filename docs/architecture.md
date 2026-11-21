@@ -96,7 +96,7 @@ PostgreSQL 可延後 FK 檢查，但 EF Core 可能先遇到 tracked graph 的�
 
 Version 對實際新增、實際刪除及關房加一；加入／身分恢復不增加內容版本，重刪不存在項目不增加。API bigint 版本用十進位字串，Client 用 BigInt 比較，不用 Number 或字典序。Content 不建全文索引；後續依查詢計畫調整。
 
-## 4. REST 契約與錯誤
+## 4. HTTP API 契約與錯誤
 
 受保護 API 帶 `Authorization: Bearer <participantCredential>`，使用不透明憑證驗證器，並非 JWT。每次限定 Participant.RoomId、路徑 Room.Id、item RoomId，檢查未過期且 DeletedAt 為 NULL。公開加入只知道 Code，不能以 Code 直接呼叫文字 API。
 
@@ -110,6 +110,7 @@ Version 對實際新增、實際刪除及關房加一；加入／身分恢復不
 | POST /api/rooms/{roomId}/items，body: content | Bearer；鎖內驗證 8 KiB／300 筆；Owner 取自驗證器；201 回 item 與 committedVersion，作同步提示，不直接拼入快照 |
 | DELETE /api/rooms/{roomId}/items/{itemId} | Bearer＋Owner；200 回 changed、committedVersion；同房不存在 changed=false、不扣計數／加版本；非本人 403，房主亦同 |
 | DELETE /api/rooms/{roomId} | Bearer＋Creator；設定 DeletedAt／Version，commit 後 204，Client 終止本房；其他人 403，已失效 404 |
+| POST /hubs/room/negotiate | Bearer；先計入已驗證的協商速率，再預檢連線名額。成功回 SignalR negotiate 資料，僅宣告 WebSockets |
 
 方案 A 不需要新增單筆 GET 或 committed change／previousVersion 協定；從第一版契約移除，未來局部同步再另設計。body 不接受 Owner／Creator 等可寫授權欄位。憑證與內容回應皆 no-store。
 
@@ -117,14 +118,21 @@ Version 對實際新增、實際刪除及關房加一；加入／身分恢復不
 | --- | --- |
 | 400 EmptyContent／TextTooLarge／InvalidRequest | 原文空白、超 8 KiB 或格式錯；保留使用者輸入並提示修正 |
 | 413 RequestBodyTooLarge | JSON Body 超 32 KiB；獨立於原文限制 |
-| 401 ParticipantUnauthorized | 缺少／無效／不屬該房 Credential；停操作與連線，不自動建新身分 |
+| 401 ParticipantUnauthorized | 缺少／無效 Credential；停操作與連線，不自動建新身分 |
+| 403 ParticipantUnauthorized | 已驗證的 REST 憑證屬於其他房間，扣 Participant 讀取配額後拒絕 |
+| 429 CredentialFailureRateLimited | 來源失敗桶無可用額度，帶 Retry-After，請求未查詢 DB |
 | 403 ItemDeleteForbidden／RoomDeleteForbidden | 身分有效但無操作權；不變更畫面成假成功 |
 | 404 RoomUnavailable | 不存在／過期／關房對外相同；清該 UUID 的本機狀態，不能靜默換房 |
 | 409 RoomItemLimitReached／ParticipantLimitReached | 300 筆或候選 Participant 預算已滿；不得把 TotalBytes 當容量錯誤 |
 | 429 RateLimited | Retry-After；合併同步工作並退避，不每個通知各排重試 |
+| 429 HubConnectionLimitReached | 已驗證協商的連線名額已滿，`Retry-After` 預設 30 秒。Hub 延長退避，REST 繼續運作 |
 | 503 Overloaded／ServiceUnavailable | 高負載或 DB 暫時失敗，明確顯示；結果不確定的 POST 不自動重送 |
 
 ProblemDetails 含 code／correlationId，不含內容、Credential 或 stack trace。POST 提交後回應遺失可能已成功：提示不確定並重新讀取狀態；建房／加入憑證回應遺失無法找回，不自動重送，不做內容去重。通知失敗不把已提交操作回成假回滾。成功回傳 committedVersion 只表示 DB 提交，不表示全部 Client 已同步。
+
+協商的 `429 RateLimited`（協商速率）與 `429 HubConnectionLimitReached`（連線名額）均帶 `Cache-Control: no-store`、`Retry-After`，並在 ProblemDetails body 的 `retryAfterSeconds` 提供相同的整數秒數，供 SignalR 前端讀取。
+
+`503 Overloaded` 在 handler 執行前回應，帶 `Retry-After`、相同秒數的 `retryAfterSeconds` 及 `Cache-Control: no-store`。Client 只有在建房、Join 或新增文字收到此代碼時，才依 `Retry-After` 加最多 500 ms 隨機延遲自動重試最多三次。耗盡後顯示忙碌並保留輸入，使用者在期限後可手動重試。
 
 ## 5. 交易、鎖與期限
 
@@ -179,11 +187,17 @@ Hub 無法使用時，Client 仍以 REST 載入及手動更新快照，並以同
 
 明確啟用自動重連，initial start 失敗另處理；指數退避＋jitter／最大間隔。每次重連用原 Credential 驗證、SubscribeRoom、重新讀所需範圍；不能假設 group 或事件會自動恢復。[SignalR groups](https://learn.microsoft.com/en-us/aspnet/core/signalr/groups?view=aspnetcore-10.0)
 
+transport 限 WebSockets。先以 Bearer 協商，再用回傳的 `connectionToken` 作為 WebSocket 連線的單一 `id` 參數。缺少、空白或重複的 `id` 在憑證查詢及取得連線名額前回 400 `InvalidRequest`，由 SignalR 驗證其餘 token。Hub 協商及 WebSocket 連線若收到不符的 `Origin` 皆回 403。只有 Hub 路徑的 WebSocket 請求可使用 `access_token` query。若 WebSocket 無法建立，沿用既有中斷提示和 REST 同步。S7-4 可把 negotiate 和其他短 HTTP 工作與常駐 WebSocket 分開計算。
+
+協商預檢通過後可能與其他連線競爭名額。若 `OnConnectedAsync` 拒絕，SignalR Close 帶 `HubException: HubConnectionLimitReached`，且不允許該 Close 進入內建自動重連。Client 由啟動錯誤或 Close 套用至少 30 秒加 jitter 的退避，期間繼續 REST 輪詢。只有 `SubscribeRateLimited` 會在同一連線等一格額度補回後重試訂閱，其他訂閱錯誤沿用原本的連線復原流程。
+
 401／RoomUnavailable 是該身分／UUID 的終止狀態：增加 generation、清文字／該房 Credential、停工作與連線，不自動 Join 同 Code。到期倒數可用 expiresAt／serverTime 校準，但 DB 判定才是權威。已顯示文字仍可複製，背景節流／離線不保證修復時限。
 
 Host 有界追蹤已驗證訂閱的 connectionId、RoomId 與中止連線的回呼，Participant 身分由 Hub 既有驗證流程取得，期限由 Worker 分批依 DB 時間複驗。關房 commit 後盡力提示並中止同房連線，SignalR 斷線時移除群組成員。Worker 補清到期、已關與已刪除房間的連線。清線可能延遲，REST 與 Hub invocation 仍各自重驗。通知仍可能遺漏，由 REST 校正；沒有正文推播、持久回放、Outbox、Message Queue 或 exactly-once。
 
-1,500 條上限只限制 Host 的追蹤表記憶體。滿載時仍加入群組並做加入後的 DB 複驗。完成訂閱後只在該連線生命週期記住未追蹤狀態，名額釋出後由新訂閱使用，既有未追蹤連線不補登。關房及 Worker 只中止已追蹤連線。未追蹤連線仍會收到既有提示，並透過 REST 404 或主資料已移除後的 401、前景輪詢及 Client 失效流程停止連線。Worker 每輪最多記錄一次 `6009 RoomConnectionTrackingFull` Warning，摘要為期間內成功但未追蹤的訂閱數 `UntrackedSubscriptions`，停用 Worker 時不輸出這項摘要。S7 的全站／Participant 等連線配額另行交付。
+S7-3 的全站連線上限（預設 1,500）與 S6 的 `RoomConnections` 追蹤表共用 `Api:Hub:GlobalConnections`。前者在 `OnConnectedAsync` 原子檢查並取得全站、來源、房間和 Participant 名額；來源、房間和 Participant 的計數歸零時移除條目。名額憑據與每連線的訂閱桶存於 `Context.Items`。初始化失敗時立即釋放；框架在這類失敗後會清理 transport，Hub 的 `OnDisconnectedAsync` 不一定執行。正常斷線經同一個冪等釋放操作。
+
+S6 追蹤表用於關房與清理。若追蹤登記滿載，訂閱仍會加入群組並做 DB 複驗，既有未追蹤連線不補登。Worker 每輪最多記錄一次 `6009 RoomConnectionTrackingFull`，摘要為期間內成功但未追蹤的訂閱數，停用 Worker 時不輸出這項摘要。
 
 ## 7. 冷卻、失效與清理
 
@@ -205,11 +219,25 @@ Worker 只有 now ≥ ReusableAfter 且無 Rooms 引用才刪保留碼；FK 防�
 
 所有候選數字集中在需求第 5 節，標示「待安全測試與壓測調整」。公開建房／加入較嚴格，無效嘗試計數與退避、全站壓力模式共同防護，不只用單一 IP，也不因拿到某個房碼就繞過限流。全站壓力模式會影響合法加入，需監控／恢復遲滯，不能宣稱完全防止分散式猜碼。
 
-已驗證 Participant／RoomId 的配額較寬鬆，IP 只粗保護，不作所有權。1,000 人同 NAT 的既有連線測試不能被小額 IP 連線上限阻擋；千人全新公開加入的速率則應另測並分批暖機，不偷偷繞過限流。典型 5 人不是房間硬上限。
+已驗證 Participant／RoomId 的配額依入口設定，來源只用於容量保護。單一 NAT 最多持有 30 條 Hub 連線，額外的 Client 依 REST 輪詢。S8 分開量測分散來源的 1,000 條 Hub 連線、同 NAT 的 REST 回退，以及千人全新公開加入的暖機。
 
-避免任意 Code／無效 Credential 建立 partition；僅固定全站鍵、可信 IP 或已驗證內部 ID，鍵數／TTL 有界，耗盡時新鍵套保守共用桶，不直接放行。只信任已配置 Reverse Proxy allowlist 的 forwarded headers，不讓 Client 自填 X-Forwarded-For。[ASP.NET Core rate limiting](https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit?view=aspnetcore-10.0)
+配額鍵使用固定全站鍵、可信來源前綴或已驗證內部 ID。來源速率滿載時，表外來源使用對應全站桶。Participant 表滿載時，表外身分沿用 DB 底線、適用的每房額度與 HTTP 處理上限，每程序每 60 秒最多記錄一次節流警告。只信任已配置 Reverse Proxy allowlist 的 forwarded headers。
 
-HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻；SignalR 長連線／long polling 由獨立連線預算保護，不能將常駐 transport 算入短 HTTP 工作的 96 額度而把所有 REST 堵住。偽造 Credential 不使用已驗證協商寬鬆額度。
+HTTP limiter 不涵蓋每次 Hub invocation；`SubscribeRoom` 在 DB 查詢前依連線限頻，並保留 RoomId 與期限檢查。常駐 WebSocket 有獨立連線預算。協商在憑證驗證成功後才計入已驗證速率；缺少和格式錯誤的憑證直接回 401，其他無效憑證沿用 S7-1 的失敗計費及 DB 保護底線。
+
+REST endpoint filter 在參數綁定與憑證驗證後取得處理名額，產出 `IResult` 後釋放，框架之後再序列化與寫出回應。建房／Join 的速率桶則在取得處理名額後扣額，避免 `Overloaded` 重試重複扣費。negotiate 在驗證後取得讀取類名額，於 `OnStarting` 釋放，例外或取消時由同一份可重複呼叫的 lease 保底。WebSocket 升級請求全程使用憑證底線、先前協商與專用 Hub 配額。in-flight 的來源狀態隨最後一筆工作結束移除；來源表滿載時，表外來源仍受全站與分類上限。
+
+匯出的 `http.server.request.duration` 以固定原因區分拒絕。503 `Overloaded` 的 `pasto.admission.reason` 為 `in_flight` 或 `high_watermark`。429 的 `pasto.rate_limit.reason` 包括 `database_floor`、`source_rate`（建房／Join 速率）與 `participant_rate`，不帶使用者輸入、IP 或身分。
+
+| 資源 | 現有機制與訊號 | 503 |
+| --- | --- | --- |
+| HTTP 處理中 | 真實全站、分類與來源計數，及全站高／低水位遲滯 | 超限或暫停建房／加入時回 `Overloaded` |
+| DB pool | 既有 pool 上限與 DB 錯誤處理，等待量未接至 admission | 實際儲存失敗回 `ServiceUnavailable`，pool 等待水位留 Deployment |
+| 程序／容器記憶體 | 尚未接水位訊號，慢速快照記憶體留 S8 量測 | 記憶體觸發規則留 Deployment |
+| CPU | 尚未接水位訊號 | CPU 觸發規則留 Deployment |
+| 磁碟 | 尚未接水位訊號 | 磁碟觸發規則留 Deployment |
+
+過載判定以請求取得、釋放名額的事件為準，使用單調時鐘。進入條件為計數至少 80 持續 2 秒，恢復條件為低於 64 持續 10 秒。期間只要有一次事件觀察到計數離開對應範圍，該次計時就重來。沒有請求進出事件時，下一次事件才評估是否已達持續時間。
 
 每房 Participant 生命週期候選上限 1,000 筆，在 Room 鎖內檢查；不用 beforeunload 清列，不刪還被 Owner／Creator 引用的 Participant，原憑證恢復不算新名額。此為資料預算，不是在線人數。
 

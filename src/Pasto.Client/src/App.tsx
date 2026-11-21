@@ -4,6 +4,7 @@ import { ApiError, api } from './api';
 import type { RoomSession } from './api';
 import { forgetSession, loadSession, readJoinInput, routeCode, saveSession } from './session';
 import { Room } from './Room';
+import { useOverloadWait } from './useOverloadWait';
 import { applyTheme, Button, ErrorNotice, Icon, Logo, readTheme, StatusNotice, ThemeOptions } from './ui';
 import type { Theme } from './ui';
 
@@ -49,11 +50,12 @@ function Landing({ theme, onTheme, onCreate, onJoin, invalidPath }: Appearance &
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(false);
   const [error, setError] = useState<unknown>();
+  const waitingToCreate = useOverloadWait(error);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => active.current?.abort(), []);
 
   async function create() {
-    if (active.current) return;
+    if (active.current || waitingToCreate) return;
     const operation = new AbortController();
     active.current = operation;
     setCreating(true);
@@ -89,7 +91,7 @@ function Landing({ theme, onTheme, onCreate, onJoin, invalidPath }: Appearance &
       <div className="entry-grid">
         <section className="entry-card"><span className="entry-icon"><Icon name="plus" /></span><h2>建立房間</h2>
           <p>你會成為房主，可以分享房碼，也可以提前關閉房間。</p>
-          <Button variant="primary" disabled={creating} onClick={() => void create()}>{creating ? '建立中…' : '建立新房間'}</Button>
+          <Button variant="primary" disabled={creating || waitingToCreate} onClick={() => void create()}>{creating ? '建立中…' : '建立新房間'}</Button>
         </section>
         <section className="entry-card"><span className="entry-icon"><Icon name="enter" /></span><h2>加入房間</h2>
           <p>輸入六位房碼，或貼上分享連結。</p>
@@ -114,6 +116,7 @@ function RoomGate({ code, handoff, home, theme, onTheme }: Appearance & {
 }) {
   const [arrival] = useState(() => handoff.current?.session.code === code ? handoff.current : null);
   const [gate, setGate] = useState<Gate>(arrival ?? { kind: 'loading' });
+  const waitingToEnter = useOverloadWait(gate.kind === 'error' ? gate.error : undefined);
   const [attempt, setAttempt] = useState({ number: 0, fresh: false });
   const invalidate = useCallback((kind: 'identity' | 'room') => {
     if (gate.kind !== 'ready') return;
@@ -152,6 +155,7 @@ function RoomGate({ code, handoff, home, theme, onTheme }: Appearance & {
   }, [arrival, attempt, code, handoff]);
 
   function retry(fresh: boolean) {
+    if (waitingToEnter) return;
     setGate({ kind: 'loading' });
     setAttempt({ number: attempt.number + 1, fresh });
   }
@@ -169,7 +173,7 @@ function RoomGate({ code, handoff, home, theme, onTheme }: Appearance & {
       action={<Button onClick={home}>回首頁</Button>}>
       房間裡的文字已無法讀取。可以回到首頁建立新房間。</StatusNotice>}
     {gate.kind === 'error' && <><ErrorNotice error={gate.error} />
-      <Button onClick={() => retry(attempt.fresh)}>再試一次</Button></>}
+      <Button disabled={waitingToEnter} onClick={() => retry(attempt.fresh)}>再試一次</Button></>}
     {gate.kind !== 'room' && <Button onClick={home}>回首頁</Button>}
   </main></div>;
 }

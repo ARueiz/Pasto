@@ -12,7 +12,7 @@ internal static class RoomCreationEndpoint
         {
             var room = await create.ExecuteAsync(cancellationToken);
             return Results.Created($"/api/rooms/{room.RoomId}", new CreatedRoomResponse(room));
-        }).WithName(Name).AllowAnonymous();
+        }).WithName(Name).AllowAnonymous().LimitWork(HttpWork.Join);
 }
 
 // 不用 record，避免自動 ToString 印出 Credential。

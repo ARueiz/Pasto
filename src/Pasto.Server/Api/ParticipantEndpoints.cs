@@ -9,11 +9,7 @@ internal static class ParticipantEndpoints
 
     public static void MapParticipants(this WebApplication app)
     {
-        app.MapPost("/api/rooms/join", async (JoinRequest request, JoinRoom join, CancellationToken cancellationToken) =>
-        {
-            var joined = await join.ExecuteAsync(request.Code, cancellationToken);
-            return Results.Created($"/api/rooms/{joined.RoomId}/me", new JoinedRoomResponse(joined));
-        }).WithName(JoinName).AllowAnonymous();
+        app.MapPost("/api/rooms/join", JoinAsync).WithName(JoinName).AllowAnonymous().LimitWork(HttpWork.Join);
         app.MapGet("/api/rooms/{roomId:guid}/me", async (Guid roomId, HttpContext context, GetParticipant get,
             CancellationToken cancellationToken) =>
         {
@@ -26,7 +22,28 @@ internal static class ParticipantEndpoints
                 participant.IsCreator,
                 authorCode = ParticipantAuthorCode.From(participant.RoomId, participant.ParticipantId)
             });
-        }).WithName(MeName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
+        }).WithName(MeName).RequireAuthorization().LimitWork(HttpWork.ReadDelete).AddEndpointFilter<ParticipantReadFilter>();
+    }
+
+    private static async Task<IResult> JoinAsync(JoinRequest request, HttpContext context, JoinRoom join,
+        JoinSourceCooldown cooldown, JoinPressureLimiter pressure, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var joined = await join.ExecuteAsync(request.Code, cancellationToken);
+            return Results.Created($"/api/rooms/{joined.RoomId}/me", new JoinedRoomResponse(joined));
+        }
+        catch (Exception exception) when (exception is InvalidRoomCodeException or RoomUnavailableException)
+        {
+            if (exception is RoomUnavailableException) pressure.RecordLookupMiss();
+            if (cooldown.RecordFailure(CreationRateLimiting.IpKey(context), request.Code) is not int seconds)
+                throw;
+            return PublicJoinAdmission.Rejection(context, seconds, "join_source_cooldown");
+        }
+        catch (RoomJoinRateLimitedException denied)
+        {
+            return PublicJoinAdmission.Rejection(context, denied.RetryAfterSeconds, "join_room");
+        }
     }
 }
 

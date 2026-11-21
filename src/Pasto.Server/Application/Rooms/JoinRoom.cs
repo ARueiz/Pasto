@@ -7,12 +7,19 @@ public interface IRoomJoinStore
     Task<(Room Room, Guid ParticipantId)> JoinAsync(string code, byte[] credentialHash, CancellationToken cancellationToken);
 }
 public sealed class InvalidRoomCodeException() : Exception("Room code is invalid.");
+internal sealed class RoomJoinRateLimitedException(int retryAfterSeconds) : Exception("Room join rate exceeded.")
+{
+    internal int RetryAfterSeconds { get; } = retryAfterSeconds;
+}
+
 public sealed class JoinRoom(IRoomJoinStore store, IRoomSecrets secrets)
 {
+    internal static string? NormalizeCode(string? code) => code?.Trim().ToUpperInvariant();
+
     public async Task<JoinedRoom> ExecuteAsync(string? code, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var normalized = code?.Trim().ToUpperInvariant();
+        var normalized = NormalizeCode(code);
         if (normalized is null || normalized.Length != 6 || normalized.Any(c => c is not (>= 'A' and <= 'Z' or >= '0' and <= '9')))
             throw new InvalidRoomCodeException();
         var credential = secrets.GenerateCredential();

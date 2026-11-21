@@ -15,14 +15,14 @@ namespace Pasto.IntegrationTests;
 public sealed class RequestBodyLimitTests
 {
     [Theory]
-    [InlineData(32767, false, 400)]
-    [InlineData(32768, false, 400)]
-    [InlineData(32769, false, 413)]
-    [InlineData(16384, true, 400)]
+    [InlineData(1023, false, 400)]
+    [InlineData(1024, false, 400)]
+    [InlineData(1025, false, 413)]
+    [InlineData(512, true, 400)]
     // Kestrel 10.0.13 也計算 chunk framing；此處保留較保守的原生上限，不調高它。
-    [InlineData(32767, true, 413)]
-    [InlineData(32768, true, 413)]
-    [InlineData(32769, true, 413)]
+    [InlineData(1023, true, 413)]
+    [InlineData(1024, true, 413)]
+    [InlineData(1025, true, 413)]
     public async Task RealKestrel_EnforcesBodyLimitBeforeJoinStore(int bytes, bool chunked, int expectedStatus)
     {
         var store = new UnexpectedJoinStore();
@@ -55,6 +55,31 @@ public sealed class RequestBodyLimitTests
         Assert.Equal(expectedStatus == 413 ? "RequestBodyTooLarge" : "InvalidRequest", body.RootElement.GetProperty("code").GetString());
         Assert.False(string.IsNullOrWhiteSpace(body.RootElement.GetProperty("correlationId").GetString()));
         Assert.Equal(0, store.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealKestrel_RejectsOversizedCreateBodyBeforeStorage(bool chunked)
+    {
+        // No working DB is needed. A creation that reaches storage would return 503 instead.
+        await using var factory = new PastoApiFactory("Host=127.0.0.1;Port=1;Database=pasto_test");
+        factory.UseKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        using var client = factory.CreateClient();
+        var payload = new byte[1025];
+        using HttpContent content = chunked ? new StreamingContent(payload) : new ByteArrayContent(payload);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/rooms")
+        {
+            Content = content,
+            Version = HttpVersion.Version11,
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact
+        };
+        if (chunked) request.Headers.TransferEncodingChunked = true;
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("RequestBodyTooLarge", body.RootElement.GetProperty("code").GetString());
     }
 
     private sealed class UnexpectedJoinStore : IRoomJoinStore

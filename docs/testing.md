@@ -1,5 +1,145 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S7 整合審查 P3 修正（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~ExportedHttpMetricsDistinguishOverloadReasonsFromStorageFailure" --logger "trx;LogFileName=s7-metrics-p3-repro.trx"`，1 例預期失敗。HTTP 503 雖分別由硬上限、過載高水位與儲存失敗觸發，匯出時三者聚合成同一點。
+- 匯出測試使用正式 OpenTelemetry view，透過本機測試 exporter 擷取聚合後的 metric points。503 的 `in_flight`、`high_watermark` 與沒有過載標籤的儲存失敗各自保留。429 驗證建房／Join、DB 底線、Participant 配額的固定原因。Join 測試另確認 JSON 語法錯誤回 400，來源與全站 Join 桶仍各有原本的額度。
+- 首輪相關測試 `s7-metrics-p3-focused.trx` 為 48 通過、1 失敗。測試的 OpenTelemetry reader 依 meter 名稱訂閱，同時收到平行測試主機的 429。將匯出驗收置於停用平行執行的測試集合後重跑。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~TelemetryTests|FullyQualifiedName~CredentialAdmissionTests|FullyQualifiedName~PublicJoinAdmissionTests|FullyQualifiedName~HttpWorkAdmissionTests" --logger "trx;LogFileName=s7-metrics-p3-verified.trx"`，49 通過、0 失敗、0 略過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s7-metrics-p3-full.trx"`，完整 PostgreSQL 回歸 385 通過、0 失敗、0 略過。
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 本輪修改後端、測試與文件，前端 Lint、Build、Edge 未重跑。
+
+## S7 P1 速率桶連續補充（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~ApiRateBucketTests" --logger "trx;LogFileName=s7-rate-refill-p1-repro.trx"`，九種預設 API 桶均重現失敗。每分鐘週期的桶在 burst 耗盡後仍回 60 秒，`JoinGlobal` 在 50 ms 後也沒有可用額度。
+- 修正後 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~ApiRateBucketTests|FullyQualifiedName~FullSourceRateTableLeavesNewSourcesSubjectOnlyToCorrespondingGlobalBucket|FullyQualifiedName~FullParticipantTableFailsOpenAndReclaimsOnlyAfterAllBucketsRefill" --logger "trx;LogFileName=s7-rate-refill-p1-focused.trx"`，13 通過、0 失敗、0 略過。以可控時間測試耗盡 burst、部分週期補額、保留餘額、下一格的精確邊界及長時間閒置後的容量上限。
+- 既有來源表滿載測試的三種 profile 共用一項調整。每 1,800 秒補三格的全站桶，耗盡後下一格由原先預期的 1,800 秒改為 600 秒。每 1,800 秒補一格的來源桶及 Participant 桶的等待斷言維持原值。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s7-rate-refill-p1-full.trx"`，完整 PostgreSQL 回歸 383 通過、0 失敗、0 略過。
+- 在 `src/Pasto.Client` 執行 `npm.cmd run test:ui -- --workers=1 --reporter=line`，Edge 44 通過。本次 P1 修改限後端、測試及文件。獨立複核核對補額、整秒等待、長時間不溢位與專項 TRX，無阻擋項。
+
+## S7-4 HTTP 處理名額與過載重試（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。首輪格式檢查指出新增測試的初始化器須換行，修正後通過。
+- 使用本機 PostgreSQL 與各測試的隔離 schema。後端回歸執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依下表附加 `--filter`（全套省略）及 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 通過／失敗／略過 | TRX |
+  | --- | --- | --- | --- |
+  | S7-4 專項與 30 人回歸 | `FullyQualifiedName~HttpWorkAdmissionTests\|FullyQualifiedName~PublicJoinAdmissionTests\|FullyQualifiedName~RequestBodyLimitTests` | 34／0／0 | `s7-4-focused.trx` |
+  | S7-1、S7-2、S7-3 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota\|FullyQualifiedName~PublicJoinAdmissionTests\|FullyQualifiedName~HubAdmissionTests` | 43／0／0 | `s7-4-prior-admission.trx` |
+  | 受保護 REST、SignalR、日誌、遙測 | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests\|FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 144／0／0 | `s7-4-rest-hub-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 374／0／0 | `s7-4-full.trx` |
+
+- 真 Kestrel 測試把一筆 Join 的 JSON 保持在未上傳完的狀態，並讓另一筆 Join 成功。另用小接收緩衝的 TCP client 停止讀取一份 300 筆 × 8 KiB 控制字元的快照，期間另一筆同類 metadata 讀取仍成功。這兩個測試使用分類名額 1，驗證上傳綁定及回應傳輸不會占住處理名額。
+- 真 Kestrel 的 WebSocket 驗證使用正式 8 KiB/s、寬限 15 秒設定。協商並訂閱後，連線 32 秒只有 SignalR keepalive，接著成功收到實際新增文字的 `RoomChanged`。
+- PostgreSQL 同 NAT 30 人驗收使用正式預設配額，在第一批 8 筆到達 DB 前固定佔住名額。首輪其餘 22 筆全部回 `503 Overloaded`、`Retry-After: 1`，且資料庫當時只有房主。其他來源仍能加入另一房。解除阻擋後，依相同的退避規則重試，30 個新身分均成功。另以 Edge 直接執行前端 API，使用模擬的 8 名額 HTTP gate 證明 30 次加入全可在三輪重試內成功。
+- 在 `src/Pasto.Client` 執行 `npm.cmd run lint`、`npm.cmd run build` 及 `npm.cmd run test:ui -- --workers=1 --reporter=line`，均通過。完整 Edge 44 例含 6 個新增案例，驗證退避、三次上限、離頁取消、草稿保留及 `ServiceUnavailable` 不自動重送。
+
+## S7-3 P2 與 P3 審查修正（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~WebSocketWithoutNegotiatedIdIsRejectedWithoutOccupyingCapacity" --logger "trx;LogFileName=s7-3-review-p2-repro.trx"`。真 PostgreSQL 案例重現 1 例失敗，缺少 `id` 的 WebSocket 仍成功升級。
+- 修正後 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 回歸執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依表附加 `--filter`（全套省略）及 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 通過／失敗／略過 | TRX |
+  | --- | --- | --- | --- |
+  | S7-3 專項 | `FullyQualifiedName~HubAdmissionTests` | 14／0／0 | `s7-3-review-focused.trx` |
+  | S7-1、S7-2 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota\|FullyQualifiedName~PublicJoinAdmissionTests` | 29／0／0 | `s7-3-review-prior-admission.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-3-review-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-3-review-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 361／0／0 | `s7-3-review-full.trx` |
+
+- 驗收檢查缺少、空值與重複 `id` 均回 400，Hub 未啟動，唯一名額仍可由正常協商的連線取得。跨來源 Origin 搭配有效的協商 token 回 403，同一 token 隨後可以用於同源連線。S7-1 的 WebSocket 驗收以真正的協商 token 驗證既有 DB 底線及失敗計費。
+- 修正輪只修改後端、後端測試與文件，未重新執行前端 Lint、Build 或 Edge，沿用上一輪 Edge 38 例通過的結果。
+- 獨立複核確認 middleware 順序、有效協商 token 的測試路徑與前兩批回歸證據，無提交阻擋項。
+
+## S7-3 SignalR 連線與訂閱配額（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 測試使用本機 PostgreSQL 與隔離 schema。執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依表附加 `--filter`（全套省略）及 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 通過／失敗／略過 | TRX |
+  | --- | --- | --- | --- |
+  | S7-3 專項 | `FullyQualifiedName~HubAdmissionTests` | 10／0／0 | `s7-3-focused.trx` |
+  | S7-1、S7-2 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota\|FullyQualifiedName~PublicJoinAdmissionTests` | 29／0／0 | `s7-3-prior-admission.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-3-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-3-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 357／0／0 | `s7-3-full.trx` |
+
+- 後端專項驗證四層同時爭搶與冪等釋放、已驗證協商速率與滿載回收、缺少或格式錯誤的憑證不占已驗證額度、SSE／Long Polling 拒絕，以及訂閱額度在 DB 查詢前檢查。真實 SignalR 連線中，兩筆 negotiate 都通過後，先取得名額的連線成功訂閱，輸方收到 type 7、`HubException: HubConnectionLimitReached`，且 `allowReconnect` 未啟用。取得名額後注入初始化例外，測試觀察到 transport 清理、Hub `OnDisconnectedAsync` 未執行，下一條連線仍能取得名額。
+- 在 `src/Pasto.Client` 執行 `npm.cmd run lint`、`npm.cmd run build`、`npm.cmd run test:ui -- --workers=1 --reporter=line`，均通過。Edge 共 38 例，包含 6 個 S7-3 專項。使用模擬的 negotiate 429、協定 Close 與 WebSocket 建立失敗，驗證長退避、REST 持續更新和訂閱回復；另以實際 SignalR JS 套件核對 Close 不會進入內建自動重連。首輪前端 Build 因測試中 SignalR 全域型別轉型而失敗，改為檢查可選欄位後通過。
+
+## S7-2 P1 與 P3 審查修正（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~FirstNewLookupMissAfterCooldownImmediatelyReturns120SecondRetry" --logger "trx;LogFileName=s7-2-review-p1-repro.trx"`。真 PostgreSQL 案例重現 1 例失敗，60 秒冷卻後第一個新錯碼預期 429、實際回 404。
+- 修正後 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 回歸執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依下表附加 `--filter`（全套省略）與 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 結果（通過／失敗／略過） | TRX |
+  | --- | --- | --- | --- |
+  | S7-2 專項 | `FullyQualifiedName~PublicJoinAdmissionTests` | 14／0／0 | `s7-2-review-focused.trx` |
+  | S7 第一批專項 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota` | 15／0／0 | `s7-2-review-s7-1-regression.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-2-review-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-2-review-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 347／0／0 | `s7-2-review-full.trx` |
+
+- 專項驗證 20 筆同時期錯碼後的重犯立即回 429／120 秒、保留指紋去重及 300 秒上限。到第 720 秒時最初的 20 筆已過 10 分鐘，測試補滿視窗再確認下次仍為 300 秒。滿載案例驗證表外來源仍可 Join，超過每來源 Join 桶後回 429，並核對 EventId 6103 的節流筆數。預設值案例以同一來源併發建立 30 個不同的 Participant，第 31 筆收到 429 與 `Retry-After`。
+- 這輪修改後端、後端測試與文件，前端 Lint、Build 與 Edge 未重跑。Edge 沿用第一批的 32 例通過結果。
+- 獨立複核確認四項修正與專項 TRX。F1 以最舊指紋汰換保留 20 筆上限，被汰換的房碼在原視窗內可能再次計入。完整 PostgreSQL 回歸由實作方執行。
+
+## S7-2 公開 Join 防護（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 通過，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 使用本機 PostgreSQL 18.6 的 `pasto_test`，每例依既有 fixture 建立隔離 schema。執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依下表附加 `--filter`（全套省略）與 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 結果（通過／失敗／略過） | TRX |
+  | --- | --- | --- | --- |
+  | S7-2 專項 | `FullyQualifiedName~PublicJoinAdmissionTests` | 12／0／0 | `s7-2-focused.trx` |
+  | S7 第一批專項 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota` | 15／0／0 | `s7-2-s7-1-regression.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-2-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-2-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 345／0／0 | `s7-2-full.trx` |
+
+- 專項涵蓋同 NAT 的 30 次相同失效碼、20 筆不同錯碼門檻、IPv6 /64、滾動視窗與退避、冷卻表滿載和每分鐘日誌節流、全站 300 筆計數與兩段恢復、壓力期間已驗證的 REST 和 WebSocket Hub。每房測試以兩個來源送出 30 筆併發 Join，核對獨立 Participant ID、第 31 筆 429、其他房間不受影響及每 2 秒回補一格。另用 `pg_blocking_pids` 證明兩個交易競爭最後一格，並驗證房間已滿、失效、憑證恢復、寫入失敗及提交失敗的計費差異。
+- 初次同 NAT 去重驗收調高既有來源 Join 桶，以單獨驗證冷卻。當時正式預設每來源 burst 仍為 20，後續審查修正將預設調為 30。
+- 首輪 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~PublicJoinAdmissionTests" --logger "trx;LogFileName=s7-2-focused-initial.trx"` 為 10 通過、1 失敗。滿載 Warning 已出現在 Console，測試日誌接收端對 Serilog 轉送的結構欄位數假設錯誤。修正測試收集後，改在測試本體驗證 EventId、層級、彙總訊息與節流。
+- 獨立複核指出冷卻開始時清空集合會讓同一房碼在原 10 分鐘視窗內再次計費。修正後保留各筆首次計時，並驗證冷卻結束後的去重與再犯退避。審查方複核修正並核對專項 TRX；完整 PostgreSQL 回歸由實作方執行。
+- S7-2 只修改後端、後端測試與文件。前端 Lint、Build、Edge 未執行。
+
+## S7 第一批憑證失敗計費（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s7-credential-admission-full-verified.trx"` 完整 PostgreSQL 回歸 332 通過、0 失敗、0 略過，耗時 1 分 22 秒。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~CredentialAdmissionTests|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota" --logger "trx;LogFileName=s7-credential-admission-final-focused.trx"` 共 14 例通過。涵蓋可信代理前綴分組、建房／加入、REST／negotiate／WebSocket 入口、跨房計費、併發 DB 查詢上限、快取 TTL／容量／淘汰、指標與節流日誌。同 NAT 測試有 4 筆冷啟動查詢同時回傳查無，接續 60 筆直接回 401，同一舊憑證只扣一格，新有效憑證仍可讀寫。
+- 受保護 REST 回歸 122 例、SignalR／日誌／遙測回歸 22 例，均無失敗或略過。使用 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，分別加下列 filter 與 `--logger "trx;LogFileName=<檔名>"`。TRX 保留在 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | Filter | TRX |
+  | --- | --- |
+  | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | `s7-rest-regression.trx` |
+  | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | `s7-hub-telemetry-regression.trx` |
+
+- `npm.cmd run lint`、`npm.cmd run build`、`npm.cmd run test:ui -- --workers=1 --reporter=line` 均通過。Edge 共 32 例，其中 3 例驗證 429 時手動刷新與前景事件不跳過退避、REST 仍可讀寫，以及首次協商和自動重連遇 401 均立即進入身分失效流程。Windows 本機的 Playwright worker 結束後暫時保留 Vite 子程序，結束該次測試所啟動的 Vite 後，Playwright 回傳 32 passed 與 exit 0。
+- 首輪專項 `s7-credential-admission-focused.trx` 有 8 例失敗，原因為測試 SQL 計數綁定了查詢別名，以及 TestServer 傳 JSON 時未建立正常的 body feature。改用欄位條件識別查詢並透過 TestServer 的 HTTP handler 傳送 JSON 後，`s7-credential-admission-verified.trx` 的 10 例全過。首輪格式檢查另發現測試的物件初始化器需要換行，修正後通過。
+- 首輪完整回歸 `s7-credential-admission-full.trx` 為 329 通過、2 失敗。兩個快照配額案例仍以缺少憑證的請求消耗 DB 底線，預期 429，實際依新規格回 401。修正案例用不同的格式正確憑證驗證 DB 底線，另由新專項案例斷言缺少與格式錯誤的憑證不計費也不查 DB。
+
+### S7 第一批 P1 審查修正（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~FullFailureSourceTableLeavesNewSourcesSubjectToDatabaseFloorOnly|FullyQualifiedName~FailureCacheAndSourceCapacityAreBoundedAndUseMonotonicExpiry" --logger "trx;LogFileName=s7-credential-admission-review-repro.trx"`。兩例皆重現失敗。新來源第二次查無預期 401、實際為 429，直接預檢預期可通過、實際回 Retry-After 1 秒。
+- 修正後執行 `dotnet build Pasto.slnx -c Release --no-restore`，零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 回歸執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依下表加 `--filter` 及 `--logger "trx;LogFileName=<檔名>"`。
+
+  | 測試 | Filter | TRX |
+  | --- | --- | --- |
+  | 專項 15 例通過 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota` | `s7-credential-admission-review-focused.trx` |
+  | 受保護 REST 122 例通過 | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | `s7-credential-admission-review-rest.trx` |
+  | SignalR／日誌／遙測 22 例通過 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | `s7-credential-admission-review-hub-telemetry.trx` |
+  | 完整 PostgreSQL 333 例通過 | 全套 | `s7-credential-admission-review-full.trx` |
+
+- 修正後四組均為 0 失敗、0 略過，完整 PostgreSQL 回歸耗時 1 分 23 秒。
+- 用真 PostgreSQL 與 DI 注入兩筆來源上限。表滿時，不在表中的來源可以查無並回 401，重送同憑證命中快取。新來源第 7 筆需查詢的請求被每來源底線拒絕，全站第 17 筆需查詢的請求被全站底線拒絕，兩次拒絕均未查 DB。有效憑證的 me、快照、新增、刪除、關房及 Hub negotiate 皆成功。既有來源的失敗桶耗盡後仍在 DB 查詢前回 429。手動時鐘驗證 `6102` 在 59 秒時仍節流，滿 60 秒的下一次未計費事件才送出下一筆摘要。
+- 本輪修改後端與文件。Edge 沿用第一批 32 例通過的結果，本輪未重跑。
+
 ## Logging、Health Checks 與 OpenTelemetry（2026-11-21）
 
 - Release Build 0 警告、0 錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。Health 測試初始化器首次格式檢查未通過，修正換行後重跑通過。

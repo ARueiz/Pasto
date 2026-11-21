@@ -36,7 +36,7 @@ internal static class ItemEndpoints
                 snapshotVersion = snapshot.Version.ToString(CultureInfo.InvariantCulture),
                 snapshot.ExpiresAt
             });
-        }).WithName(SnapshotName).RequireAuthorization().AddEndpointFilter<ParticipantReadFilter>();
+        }).WithName(SnapshotName).RequireAuthorization().LimitWork(HttpWork.ReadDelete).AddEndpointFilter<ParticipantReadFilter>();
 
         app.MapPost("/api/rooms/{roomId:guid}/items", async (Guid roomId, AddItemRequest request,
             HttpContext context, AddItem add, RoomChangeNotifications notifications, ServerMetrics metrics,
@@ -48,6 +48,10 @@ internal static class ItemEndpoints
             try
             {
                 result = await add.ExecuteAsync(roomId, identity.ParticipantId, request.Content!, cancellationToken);
+            }
+            catch (RoomAddRateLimitedException denied)
+            {
+                return CreationRateLimiting.Rejection(context, denied.RetryAfterSeconds, "RateLimited", "room_add");
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
@@ -69,7 +73,7 @@ internal static class ItemEndpoints
                 },
                 committedVersion = result.CommittedVersion.ToString(CultureInfo.InvariantCulture)
             }, statusCode: StatusCodes.Status201Created);
-        }).WithName(AddName).RequireAuthorization().AddEndpointFilter<ParticipantWriteFilter>();
+        }).WithName(AddName).RequireAuthorization().LimitWork(HttpWork.Add).AddEndpointFilter<ParticipantWriteFilter>();
 
         app.MapDelete("/api/rooms/{roomId:guid}/items/{itemId:guid}", async (Guid roomId, Guid itemId,
             HttpContext context, DeleteOwnItem delete, RoomChangeNotifications notifications, CancellationToken cancellationToken) =>
@@ -78,7 +82,7 @@ internal static class ItemEndpoints
             var result = await delete.ExecuteAsync(roomId, identity.ParticipantId, itemId, cancellationToken);
             if (result.Changed) await notifications.PublishAsync(roomId, result.CommittedVersion);
             return Results.Ok(new { result.Changed, committedVersion = result.CommittedVersion.ToString(CultureInfo.InvariantCulture) });
-        }).WithName(DeleteName).RequireAuthorization().AddEndpointFilter<ParticipantWriteFilter>();
+        }).WithName(DeleteName).RequireAuthorization().LimitWork(HttpWork.ReadDelete).AddEndpointFilter<ParticipantWriteFilter>();
     }
 }
 

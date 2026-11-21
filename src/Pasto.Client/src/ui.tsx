@@ -55,6 +55,11 @@ const errors: Record<string, string> = {
 };
 
 export function ErrorNotice({ error, uncertain = false }: { error: unknown; uncertain?: boolean }) {
+  if (error instanceof ApiError && error.status === 503) return <StatusNotice title="伺服器忙碌" danger alert>
+    {error.code === 'Overloaded' ? '操作尚未執行，請稍候再試。' : uncertain
+      ? '目前無法確認操作結果。請先重新整理或確認房間狀態，再決定是否重試。'
+      : '請稍候再試。'}
+  </StatusNotice>;
   if (error instanceof ApiError && error.status === 429) return <StatusNotice title="操作太頻繁" danger alert>
     請在 {error.retryAfter} 秒後再試一次。
   </StatusNotice>;

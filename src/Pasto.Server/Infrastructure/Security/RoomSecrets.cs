@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using Pasto.Server.Application.Rooms;
 
 namespace Pasto.Server.Infrastructure.Security;
@@ -15,6 +14,6 @@ public sealed class RoomSecrets : IRoomSecrets
         var value = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16))
             .TrimEnd('=').Replace('+', '-').Replace('/', '_');
         // 對傳給 Client 的原始字串之 UTF-8 bytes 取 SHA-256；後續驗證必須採相同編碼。
-        return new ParticipantCredential(value, SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+        return new ParticipantCredential(value, ParticipantCredential.HashValue(value));
     }
 }

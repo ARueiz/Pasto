@@ -1,57 +1,35 @@
 using System.Globalization;
-using System.Threading.RateLimiting;
-using Microsoft.AspNetCore.RateLimiting;
+using System.Net.Sockets;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Pasto.Server.Api;
 
 internal static class CreationRateLimiting
 {
-    public static void Configure(RateLimiterOptions options, ApiOptions settings)
+    internal static Task RejectAsync(HttpContext context, int retryAfterSeconds, string code, string reason)
+        => Rejection(context, retryAfterSeconds, code, reason).ExecuteAsync(context);
+
+    internal static IResult Rejection(HttpContext context, int retryAfterSeconds, string code, string reason)
     {
-        options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
-            PartitionedRateLimiter.Create<HttpContext, string>(context => Profile(context, settings) is { } profile
-                ? RateLimitPartition.GetTokenBucketLimiter($"{profile.Key}:{IpKey(context)}", _ => Bucket(profile.PerIp))
-                : RateLimitPartition.GetNoLimiter("other")),
-            PartitionedRateLimiter.Create<HttpContext, string>(context => Profile(context, settings) is { } profile
-                ? RateLimitPartition.GetTokenBucketLimiter(profile.Key, _ => Bucket(profile.Global))
-                : RateLimitPartition.GetNoLimiter("other")));
-        options.OnRejected = async (rejection, _) =>
-        {
-            var profile = Profile(rejection.HttpContext, settings);
-            await RejectAsync(rejection.HttpContext, rejection.Lease,
-                profile is null ? 60 : Math.Max(profile.Value.PerIp.PeriodSeconds, profile.Value.Global.PeriodSeconds));
-        };
+        context.Features.Get<IHttpMetricsTagsFeature>()?.Tags.Add(new("pasto.rate_limit.reason", reason));
+        context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+        return ApiProblem.Create(context, 429, code);
     }
 
-    private static (string Key, BucketOptions PerIp, BucketOptions Global)? Profile(HttpContext context, ApiOptions settings)
-        => context.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName switch
-        {
-            RoomCreationEndpoint.Name => ("create", settings.CreatePerIp, settings.CreateGlobal),
-            ParticipantEndpoints.JoinName => ("join", settings.JoinPerIp, settings.JoinGlobal),
-            // DELETE 同樣須先保護憑證查詢，但不耗 Participant 的讀取配額。
-            ParticipantEndpoints.MeName or RoomEndpoints.StateName or RoomEndpoints.CloseName
-                or ItemEndpoints.AddName or ItemEndpoints.DeleteName or ItemEndpoints.SnapshotName
-                => ("read", settings.ReadPerIp, settings.ReadGlobal),
-            _ => null
-        };
-
-    internal static Task RejectAsync(HttpContext context, RateLimitLease lease, int fallbackSeconds)
+    internal static string IpKey(HttpContext context)
     {
-        var seconds = lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
-            ? Math.Max(1, Math.Ceiling(retryAfter.TotalSeconds)) : fallbackSeconds;
-        context.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-        return ApiProblem.WriteAsync(context, 429, "RateLimited");
+        var address = context.Connection.RemoteIpAddress;
+        if (address is null)
+            return "unknown";
+        if (address.IsIPv4MappedToIPv6)
+            return address.MapToIPv4().ToString();
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            Span<byte> bytes = stackalloc byte[16];
+            address.TryWriteBytes(bytes, out _);
+            return Convert.ToHexString(bytes[..8]);
+        }
+        return address.ToString();
     }
 
-    private static string IpKey(HttpContext context)
-        => context.Connection.RemoteIpAddress?.MapToIPv6().ToString() ?? "unknown";
-
-    internal static TokenBucketRateLimiterOptions Bucket(BucketOptions settings) => new()
-    {
-        TokenLimit = settings.TokenLimit,
-        TokensPerPeriod = settings.TokensPerPeriod,
-        ReplenishmentPeriod = TimeSpan.FromSeconds(settings.PeriodSeconds),
-        AutoReplenishment = true,
-        QueueLimit = 0
-    };
 }

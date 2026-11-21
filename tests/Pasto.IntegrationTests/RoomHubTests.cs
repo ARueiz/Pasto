@@ -22,6 +22,7 @@ namespace Pasto.IntegrationTests;
 public sealed class RoomHubTests
 {
     private const string HubPath = "/hubs/room";
+    internal const string NegotiatePath = HubPath + "/negotiate?negotiateVersion=1";
 
     [Fact]
     public async Task UnexpectedHubFailure_UsesOneSanitizedApplicationEvent()
@@ -315,11 +316,36 @@ public sealed class RoomHubTests
     private static Task<CreatedRoom> CreateRoomAsync(PostgresTestDatabase database) =>
         TestRoomCreation.Create(database, new RoomSecrets()).ExecuteAsync();
 
-    private static Task<WebSocket> ConnectAsync(PastoApiFactory factory, string credential, CancellationToken cancellation)
+    internal static async Task<WebSocket> ConnectAsync(PastoApiFactory factory, string credential, CancellationToken cancellation)
+    {
+        using var client = factory.CreateClient();
+        var token = await NegotiateAsync(client, credential, cancellation);
+        return await ConnectNegotiatedAsync(factory, credential, token, cancellation);
+    }
+
+    internal static async Task<string> NegotiateAsync(HttpClient client, string credential, CancellationToken cancellation = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, NegotiatePath);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential);
+        using var response = await client.SendAsync(request, cancellation);
+        return await ReadConnectionTokenAsync(response, cancellation);
+    }
+
+    internal static async Task<string> ReadConnectionTokenAsync(HttpResponseMessage response, CancellationToken cancellation = default)
+    {
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellation);
+        Assert.Equal("WebSockets", Assert.Single(body.GetProperty("availableTransports").EnumerateArray())
+            .GetProperty("transport").GetString());
+        return body.GetProperty("connectionToken").GetString()!;
+    }
+
+    internal static Task<WebSocket> ConnectNegotiatedAsync(PastoApiFactory factory, string credential, string token,
+        CancellationToken cancellation, string origin = "http://localhost")
     {
         var client = factory.Server.CreateWebSocketClient();
-        client.ConfigureRequest = request => request.Headers.Origin = "http://localhost";
-        return client.ConnectAsync(new Uri($"ws://localhost{HubPath}?access_token={credential}"), cancellation);
+        client.ConfigureRequest = request => request.Headers.Origin = origin;
+        return client.ConnectAsync(new Uri($"ws://localhost{HubPath}?id={Uri.EscapeDataString(token)}&access_token={credential}"), cancellation);
     }
 
     private static async Task<HttpResponseMessage> SendAsync(HttpClient client, CreatedRoom room, HttpMethod method,
@@ -331,7 +357,7 @@ public sealed class RoomHubTests
         return await client.SendAsync(request);
     }
 
-    private sealed class HubMessages(WebSocket socket, CancellationToken cancellation)
+    internal sealed class HubMessages(WebSocket socket, CancellationToken cancellation)
     {
         private readonly Queue<string> frames = new();
         private int invocation;
@@ -341,6 +367,8 @@ public sealed class RoomHubTests
             await SendAsync(new { protocol = "json", version = 1 });
             Assert.Empty((await ReadAsync()).EnumerateObject());
         }
+
+        internal Task PingAsync() => SendAsync(new { type = 6 });
 
         public async Task<JsonElement> SubscribeAsync(Guid roomId)
         {
@@ -388,7 +416,7 @@ public sealed class RoomHubTests
             new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message) + '\u001e')),
             WebSocketMessageType.Text, true, cancellation);
 
-        private async Task<JsonElement> ReadAsync()
+        internal async Task<JsonElement> ReadAsync()
         {
             while (true)
             {

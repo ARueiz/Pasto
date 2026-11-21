@@ -110,8 +110,8 @@ public sealed class ItemWriteApiTests
         if (credential is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential);
         if (method == "POST") request.Content = new StringContent("{\"content\":\"ok\"}", Encoding.UTF8, "application/json");
         using var response = await client.SendAsync(request);
-        await ProblemAsync(response, 401, "ParticipantUnauthorized");
-        Assert.Contains(response.Headers.WwwAuthenticate, x => x.Scheme == "Bearer");
+        await ProblemAsync(response, kind == "cross" ? 403 : 401, "ParticipantUnauthorized");
+        Assert.Equal(kind != "cross", response.Headers.WwwAuthenticate.Any(x => x.Scheme == "Bearer"));
         await using var context = database.CreateContext();
         Assert.Empty(await context.Items.ToListAsync());
         Assert.All(await context.Rooms.ToListAsync(), x => Assert.Equal(0, x.Version));
@@ -202,7 +202,7 @@ public sealed class ItemWriteApiTests
         {
             using var request = new HttpRequestMessage(new HttpMethod(method), $"/api/rooms/{Guid.NewGuid()}/items" +
                 (method == "DELETE" ? $"/{Guid.NewGuid()}" : ""));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", new string('A', 22));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", new string(i == 0 ? 'A' : 'B', 22));
             if (method == "POST") request.Content = new StringContent("{\"content\":\"ok\"}", Encoding.UTF8, "application/json");
             using var response = await client.SendAsync(request);
             await ProblemAsync(response, i == 0 ? 401 : 429, i == 0 ? "ParticipantUnauthorized" : "RateLimited");
@@ -319,7 +319,7 @@ public sealed class ItemWriteApiTests
     private sealed class CountingVerifier : IParticipantVerifier
     {
         public int Calls { get; private set; }
-        public Task<ParticipantIdentity?> VerifyAsync(string credential, CancellationToken cancellationToken)
+        public Task<ParticipantIdentity?> VerifyAsync(byte[] credentialHash, CancellationToken cancellationToken)
         {
             Calls++;
             return Task.FromResult<ParticipantIdentity?>(null);

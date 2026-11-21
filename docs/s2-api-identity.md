@@ -104,9 +104,19 @@ Program 將 Kestrel 全域 MaxRequestBodySize 固定為 32768 bytes，在 JSON �
 
 ### Finding 2：採用方案 (a)，維持配置並接受已知風險
 
-使用者明確選擇維持 ReadPerIp／ReadGlobal 設定；本輪沒有修改任何 quota。每 IP 名目持續配額為全站 50%，burst 也為 50%，少數來源（含多個 IPv6 位址）可用格式正確的無效憑證耗盡全站讀取配額，使合法 me／後續 metadata 與快照重新同步回 429。這項可用性風險仍存在，記錄不代表已緩解。
+#### S7 第一批失敗計費
 
-目前允許的範圍僅為隔離本機 MVP 驗證，S7 公開部署前必須處理並驗證：無效憑證／分散來源壓力下的合法讀取與重連預算、全站與 NAT 配額取捨、驗證前 admission／失敗壓力模式、bounded partition 與資源監控；S8 補上負載證據，不以任意調高 DB 保護桶宣稱解決。
+S2 維持原設定。S7 第一批加入 `Api:CredentialFailuresPerSource`（burst 20、每秒補 1，無排隊），僅在格式符合且查無身分時扣額。查無的 SHA-256 hash 共用 5 分鐘固定 TTL 快取，上限 10,000 筆，滿載時依寫入順序淘汰最舊項目。命中回 401，跳過 DB 與兩種配額。快取有效期內，同一 hash 的併發查無結果最多扣一次，已在途的查詢仍可完成。
+
+分組使用 IPv4 /32 與 IPv6 /64，IPv4-mapped IPv6 還原為 IPv4。公開建房、Join 和 DB 底線的每來源分組也一併改變。REST、協商與 Hub transport 共用 `ReadPerIp` 1,000／30,000／60 與 `ReadGlobal` 2,000／60,000／60 作為 DB 保護底線。失敗桶先判斷，擋下時回 `429 CredentialFailureRateLimited`、`Retry-After`、`no-store`。缺少／格式錯誤、查無快取命中或失敗桶拒絕的請求都在 DB 底線之外。前端收到協商 401 時停止連線與 REST 重試，進入身分失效流程。
+
+**剩餘風險。** 查詢前檢查與查無後扣額之間有併發窗口，單來源瞬時可使 DB 查詢達 burst 1,000。大量不同 /64 或少數來源的瞬時併發仍可耗盡全站底線，影響跨房讀寫與 Hub 重連。共用 NAT 或 /64 的合法使用者在失敗桶空時也會收到 429。舊憑證快取可降低少數舊憑證的重試成本，但不同舊憑證仍各占一次失敗額度。有效憑證的跨房 REST 請求扣自身讀取配額，仍可能暫時阻擋同房讀取。
+
+查無快取與失敗桶為單一程序記憶體。快取保留最多 10,000 個 64 字元十六進位 hash（約 1.28 MB 字元資料，另有字串與集合開銷）。每來源失敗桶最多 20,000 個，查詢時惰性補充，每分鐘最多掃除一次已補滿且 10 分鐘未扣額的來源。滿載時，既有來源維持各自的桶，新來源退回每來源與全站的 DB 保護底線，查無仍寫入快取。驗證前無法分辨有效與無效憑證，共用失敗桶耗盡會封鎖所有新來源。
+
+**滿載與觀測限制。** 滿載期間的新來源暫停失敗計費，保護退回第一批前的 DB 底線水準。事件 `6102 ParticipantCredentialFailureSourceCapacityReached` 記錄未能計費的查無摘要，每程序最多每 60 秒一筆。事件 `6100 ParticipantCredentialFailuresThrottled` 也只提供拒絕摘要。沒有下一次事件時，最後一段累計可能未寫入日誌。精確的失敗桶拒絕數使用 `http.server.request.duration` 中標為 `pasto.rate_limit.reason=credential_failure` 的 429 次數。6102 暫無專用指標，無法由日誌得出精確未計費數。
+
+大量不同的無效憑證可擠掉 FIFO 快取中的舊憑證，新一輪重送時可能再扣額。既有 ASP.NET Core `PartitionedRateLimiter` 會移除閒置超過 10 秒的桶，create／join／DB 底線及 Participant 的 partition 仍無硬上限。S8 量測分散來源、共用 NAT、partition 數與記憶體峰值。 [.NET 10.0.13 實作](https://github.com/dotnet/runtime/blob/v10.0.13/src/libraries/System.Threading.RateLimiting/src/System/Threading/RateLimiting/DefaultPartitionedRateLimiter.cs)
 
 另一項既有設計風險亦列入 S7：持有分享連結者可持續 Join 耗盡 1000 個生命週期名額，讓其他人無法加入。Participant 上限是資料預算，不是濫用防護；公開部署前需濫用測試與取捨確認，不能自行刪除被內容引用的 Participant 釋放名額。
 
@@ -125,3 +135,7 @@ S2-02 findings 已處理，Claude 最終靜態審查無阻擋事項；這不代�
 新增 RoomStateApiTests 33 例：字串版本、資料不洩漏、缺少／無效／跨房憑證、失效房間、權限順序、共用配額、驗證前限流、未提交寫入期間的讀取、實體清理競爭、併發關房與提交失敗／取消。既有 Join 提交故障 interceptor 原樣搬至 TransactionTestHooks，供 HTTP 關房共用。
 
 實作方實測：Release Build 0 warning／0 error，相關 33 passed，完整 228 passed／0 failed／0 skipped，format verify 與 diff check 通過；殘留 schema 為 0。TRX 見 testing.md。S2-03 待獨立 review；S3 尚未開始。沒有 schema、Migration 或相依變更，S7 配額與濫用風險維持原狀。
+
+## S7 P1 持續速率修正
+
+S2 的實際額度比表列設定嚴格。整週期補充會被 `TokenLimit` 截斷，例如 `ReadGlobal` 實際每分鐘只補 2,000 格，`ReadPerParticipant` 只補 40 格，S3 的新增桶只補 10 格。P1 改為按經過時間連續補充，保留未滿一格的餘額，持續速率才符合設定中的 `TokensPerPeriod / PeriodSeconds`，且 burst 仍由 `TokenLimit` 決定。`JoinGlobal` 原本的長期平均已是每秒 30 格，現在也平滑補充。 [現行需求與配額](requirements.md#5-初始安全與資源設定待安全測試與壓測調整)

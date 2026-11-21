@@ -1,22 +1,18 @@
 using System.Globalization;
-using Microsoft.Extensions.Options;
 
 namespace Pasto.Server.Api;
 
 // me、metadata 與文字快照共用同房檢查及 Participant 讀取配額。
-public sealed class ParticipantReadFilter(ParticipantReadLimiter limiter, IOptions<ApiOptions> options) : IEndpointFilter
+internal sealed class ParticipantReadFilter(ParticipantRateLimits limiter) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var http = context.HttpContext;
         var roomId = Guid.Parse(Convert.ToString(http.GetRouteValue("roomId"), CultureInfo.InvariantCulture)!);
-        var identity = ParticipantAuthenticationHandler.Identity(http, roomId);
-        using var lease = limiter.Acquire(identity.ParticipantId);
-        if (!lease.IsAcquired)
-        {
-            await CreationRateLimiting.RejectAsync(http, lease, options.Value.ReadPerParticipant.PeriodSeconds);
-            return Results.Empty;
-        }
+        var identity = ParticipantAuthenticationHandler.Identity(http.User);
+        if (limiter.TryTake(identity.ParticipantId, ParticipantRateProfile.Read) is int retry)
+            return CreationRateLimiting.Rejection(http, retry, "RateLimited", "participant_rate");
+        if (identity.RoomId != roomId) return ApiProblem.Create(http, 403, "ParticipantUnauthorized");
         return await next(context);
     }
 }

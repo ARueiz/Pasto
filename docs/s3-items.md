@@ -6,10 +6,10 @@
 
 - POST /api/rooms/{roomId}/items 接 AddItem，201 回 item 與 committedVersion（版本皆字串）。原文不 trim；空白回 EmptyContent、超 8192 UTF-8 bytes 回 TextTooLarge、NUL／無效 Unicode 回 InvalidRequest。JSON body 上限沿用 32 KiB。
 - DELETE /api/rooms/{roomId}/items/{itemId} 接 DeleteOwnItem，200 回 changed 與 committedVersion；不存在不改版本，房主無刪除他人文字特權。
-- Owner 只能取自驗證身分，body 僅允許 content（拒絕 Owner／Creator 等未知欄位）。跨房身分先回 401；業務有效性與授權仍由既有鎖內流程重驗。
-- POST／DELETE items 與 DELETE room 在驗證前共用既有 IP／全站 admission，保護 verifier。驗證後新增套用 Participant 每分鐘 30／burst 10，刪除文字與關房共用 Participant 每分鐘 60／burst 10。使用不同於讀取的 Participant bucket；通過 JSON binding 與同房檢查後，業務成功／失敗均消耗額度，不排隊，429 帶 Retry-After 與 no-store。JSON 綁定錯誤與未通過同房檢查的請求仍受驗證前粗限流保護。
+- Owner 只能取自驗證身分，body 僅允許 content（拒絕 Owner／Creator 等未知欄位）。S7 第一批起，通過綁定的跨房請求先扣 Participant 讀取配額，再回 403，配額耗盡回 429。同房業務有效性與授權仍由既有鎖內流程重驗。
+- POST／DELETE items 與 DELETE room 的憑證查詢和讀取、Hub 共用 DB 保護底線。已驗證同房新增套用 Participant 每分鐘 30／burst 10，刪除文字與關房共用 Participant 每分鐘 60／burst 10。通過 JSON 綁定與同房檢查後，業務成功／失敗均消耗對應額度，不排隊，429 帶 Retry-After 與 no-store。
 - 每房寫入 token bucket、分類並行與部署資源 admission 依 ADR 0003 留 S7，不在本 patch 擴大範圍。S7 既有讀取／Join 濫用風險持續存在，補齊前不公開部署。
-- 驗證前共用的 admission 仍名為 read；少數來源耗盡其全站配額時，除 me／metadata／快照，也會阻擋新增文字、刪除文字與關房。Participant 寫入配額不會緩解這個較前面的共用入口風險，列入 S7 驗證。
+- S7 的來源失敗桶與查無快取可降低假憑證與舊分頁重試對共用底線的消耗。大量 /64 或瞬時併發仍可用盡全站底線，共用 NAT 仍可能被同來源失敗擋下。跨房請求可耗盡自己身分的讀取額度，同房寫入仍可使用 Participant 寫入額度。 [S7 前綴、快取與狀態上限](s2-api-identity.md#s7-第一批失敗計費)
 - 測試：HTTP 身分／權限、輸入與 byte 邊界、內容保留、計數／版本、無操作刪除、限流順序與共用性、提交失敗／取消、不重試。既有 S1 併發／容量測試與 S2 body 邊界測試納入回歸。
 
 ## S3-02：整份快照列表
