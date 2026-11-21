@@ -94,9 +94,9 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 | 跨來源防護 | 全站滾動 1 分鐘累積 300 次實際查詢後的查無／失效結果時，公開 Join 降為每秒 2 次、burst 5，至少 60 秒；同一視窗低於門檻後以每秒 10 次、burst 20 恢復 60 秒，再回到原額度 | 恢復階段再次達門檻會重新開始至少 60 秒的壓力模式。全站逐筆計算查詢結果，反映 DB 負載。格式無效在查詢前拒絕，只計入來源。被冷卻或任一前置桶拒絕的請求不計入 |
 | 已驗證 REST | 每 Participant 讀取每分鐘 240 次／burst 40，新增每分鐘 30 次／burst 10，刪除每分鐘 60 次／burst 10（token bucket）；每 IP 合計每分鐘 30,000 次／burst 1,000 作粗上限 | 為輪詢及分頁補償留餘裕；不把 IP 當身分，新加入可換 Participant，仍需房間與全站保護 |
 | 每房寫入／新 Participant | 文字寫入每分鐘 120 次／burst 20；Join 每分鐘 30 次／burst 30；生命週期 Participant 最多 1,000 筆（房主計入） | 前兩者採 token bucket。Join 以內部 Room ID 計算，先在房間交易鎖內檢查有效性和生命週期上限，成功寫入新 Participant 後、送出 commit 前才扣額度。原 Credential 恢復沿用 /me |
-| SignalR 連線 | 全站 1,500、每 IP 1,500、每房 100、每 Participant 3 條同時連線 | 保留 1,000 目標與 NAT／重連餘裕；與公開加入速率分開，均待量測 |
-| 協商／Hub 訂閱 | 已驗證協商每 IP 每秒 50 次／burst 100、全站每秒 100 次／burst 200；SubscribeRoom 每連線每分鐘 10 次／burst 3（token bucket） | 重連 jitter；無效 Credential 走公開粗保護，不套寬鬆的已驗證配額；方法仍驗證 RoomId／期限 |
-| HTTP 並行 | 全站 96 個 in-flight；建房／加入子上限 16、新增文字 32、讀取／刪除等 48；超限不排隊 | 類別上限總和 96，避免公開入口搶光；SignalR 常駐 transport 另計，不把千條 WebSocket 算進 HTTP 工作額度 |
+| SignalR 連線 | 全站 1,500、每來源 30（IPv4 /32、IPv6 /64）、每房 100、每 Participant 3 條同時連線 | negotiate 預檢，WebSocket 帶協商取得的 `connectionToken` 作為 `id`，`OnConnectedAsync` 原子取得名額。同 NAT 超過 30 條時，額外的用戶端繼續以 REST 輪詢 |
+| 協商／Hub 訂閱 | 已驗證協商每來源每秒 50 次／burst 100、全站每秒 100 次／burst 200；`SubscribeRoom` 每連線每分鐘 10 次／burst 3（token bucket） | 缺少或格式錯誤的 Credential 直接回 401，且不扣協商額度。其他驗證前流量沿用 S7-1。協商來源表上限 20,000 筆，閒置 10 分鐘後回收；表滿時，表外來源仍受全站協商速率限制 |
+| HTTP 並行 | 全站 96 個 in-flight；建房／加入子上限 16、新增文字 32、讀取／刪除等 48；超限不排隊 | SignalR 保留 negotiate，transport 僅允許 WebSockets。S7-4 可分別計算協商等短 HTTP 工作與常駐 Socket，省去 SSE／Long Polling 的 HTTP 生命週期計算 |
 | DB pool | API pool Max 64、Worker 獨立受限 pool Max 4，最小皆 0；兩者合計最多 68，另留維運連線 | 不是每個 DbContext 都開新 pool；部署 PG max_connections 須涵蓋合計與餘裕，需測等待／鎖逾時 |
 | 部署與記憶體 | 起始 app／DB 各 4 vCPU、8 GiB；DB volume 建議至少 20 GiB；磁碟 70% 警戒、85% 暫停新建／加入／新增，保留清理空間 | 部署／檔案系統能力須確認；CPU／記憶體持續高水位也降低 admission。不是精確全站資料配額，刪除亦可能耗 WAL，不能等到滿碟才動作 |
 | 有界 limiter 狀態 | 全站最多 20,000 個活躍 partition／失敗計數鍵，閒置 10 分鐘回收；S7-2 的冷卻表每程序最多 20,000 個來源 | 僅可信 IP、已驗證內部 ID 及固定全站鍵。冷卻表滿載時，表外來源暫停冷卻追蹤，仍套用每來源與全站 Join 桶、全站壓力限制及解析後的每房額度。憑證失敗計數滿載時，新來源退回 DB 保護底線。其他 admission 的有界分區留待 S7-4 |
@@ -110,6 +110,8 @@ S7-2 剩餘風險
 - 攻擊者以大量 /64 輪流送錯碼，可在恢復期反覆觸發壓力，使全站長期處於壓力模式。壓力期間若攻擊者持續送出每秒 2 次以上的請求，大部分合法 Join 會被拒，使用者需要重試。S8 量測壓力模式下合法 Join 的成功率與延遲。
 - 程序重啟會重置冷卻、壓力及每房 Join 桶。
 - 知道分享連結的人仍可耗盡 1,000 個生命週期名額。單靠公開 Join 耗盡新房的 999 個剩餘名額至少約需 32 分鐘，房主可關房重建。身分以分頁為單位，新分頁、其他裝置或無痕視窗均會消耗新名額。
+
+S7-3 的來源、房間及 Participant 連線計數只在持有名額時存在，歸零即移除。網路閃斷時，舊連線可能仍佔用名額，直到 SignalR 依 `ClientTimeoutInterval`（預設 30 秒）判定逾時。協商名額超額預設回 `Retry-After: 30`，和逾時共用 `Api:Hub:ClientTimeoutSeconds`。調整逾時時也須同步調整 Close 路徑的前端退避基準。WebSocket 無法建立時維持既有連線狀態提示及 REST 輪詢。
 
 部署警戒與 admission 必須有恢復條件及遲滯，避免臨界值反覆切換；精確門檻由負載測試確認。使用可信 Reverse Proxy allowlist 處理 forwarded headers，防自填 X-Forwarded-For。HTTP limiter 不限制每次 WebSocket invocation，Hub 方法另驗證與計數。
 

@@ -1,5 +1,39 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S7-3 P2 與 P3 審查修正（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~WebSocketWithoutNegotiatedIdIsRejectedWithoutOccupyingCapacity" --logger "trx;LogFileName=s7-3-review-p2-repro.trx"`。真 PostgreSQL 案例重現 1 例失敗，缺少 `id` 的 WebSocket 仍成功升級。
+- 修正後 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 回歸執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依表附加 `--filter`（全套省略）及 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 通過／失敗／略過 | TRX |
+  | --- | --- | --- | --- |
+  | S7-3 專項 | `FullyQualifiedName~HubAdmissionTests` | 14／0／0 | `s7-3-review-focused.trx` |
+  | S7-1、S7-2 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota\|FullyQualifiedName~PublicJoinAdmissionTests` | 29／0／0 | `s7-3-review-prior-admission.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-3-review-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-3-review-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 361／0／0 | `s7-3-review-full.trx` |
+
+- 驗收檢查缺少、空值與重複 `id` 均回 400，Hub 未啟動，唯一名額仍可由正常協商的連線取得。跨來源 Origin 搭配有效的協商 token 回 403，同一 token 隨後可以用於同源連線。S7-1 的 WebSocket 驗收以真正的協商 token 驗證既有 DB 底線及失敗計費。
+- 修正輪只修改後端、後端測試與文件，未重新執行前端 Lint、Build 或 Edge，沿用上一輪 Edge 38 例通過的結果。
+- 獨立複核確認 middleware 順序、有效協商 token 的測試路徑與前兩批回歸證據，無提交阻擋項。
+
+## S7-3 SignalR 連線與訂閱配額（2026-11-21）
+
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 測試使用本機 PostgreSQL 與隔離 schema。執行 `dotnet test Pasto.slnx -c Release --no-build --no-restore`，依表附加 `--filter`（全套省略）及 `--logger "trx;LogFileName=<檔名>"`。TRX 位於 `tests/Pasto.IntegrationTests/TestResults/`。
+
+  | 測試 | Filter | 通過／失敗／略過 | TRX |
+  | --- | --- | --- | --- |
+  | S7-3 專項 | `FullyQualifiedName~HubAdmissionTests` | 10／0／0 | `s7-3-focused.trx` |
+  | S7-1、S7-2 | `FullyQualifiedName~CredentialAdmissionTests\|FullyQualifiedName~ItemSnapshotApiTests.Snapshot_SharesReadQuota\|FullyQualifiedName~PublicJoinAdmissionTests` | 29／0／0 | `s7-3-prior-admission.trx` |
+  | 受保護 REST | `FullyQualifiedName~RoomStateApiTests\|FullyQualifiedName~ParticipantApiTests\|FullyQualifiedName~ItemWriteApiTests\|FullyQualifiedName~RoomClosureTests` | 122／0／0 | `s7-3-rest-regression.trx` |
+  | SignalR、日誌、遙測 | `FullyQualifiedName~RoomHubTests\|FullyQualifiedName~TelemetryTests\|FullyQualifiedName~ServerLoggingTests` | 22／0／0 | `s7-3-hub-telemetry-regression.trx` |
+  | 完整 PostgreSQL 回歸 | 全套 | 357／0／0 | `s7-3-full.trx` |
+
+- 後端專項驗證四層同時爭搶與冪等釋放、已驗證協商速率與滿載回收、缺少或格式錯誤的憑證不占已驗證額度、SSE／Long Polling 拒絕，以及訂閱額度在 DB 查詢前檢查。真實 SignalR 連線中，兩筆 negotiate 都通過後，先取得名額的連線成功訂閱，輸方收到 type 7、`HubException: HubConnectionLimitReached`，且 `allowReconnect` 未啟用。取得名額後注入初始化例外，測試觀察到 transport 清理、Hub `OnDisconnectedAsync` 未執行，下一條連線仍能取得名額。
+- 在 `src/Pasto.Client` 執行 `npm.cmd run lint`、`npm.cmd run build`、`npm.cmd run test:ui -- --workers=1 --reporter=line`，均通過。Edge 共 38 例，包含 6 個 S7-3 專項。使用模擬的 negotiate 429、協定 Close 與 WebSocket 建立失敗，驗證長退避、REST 持續更新和訂閱回復；另以實際 SignalR JS 套件核對 Close 不會進入內建自動重連。首輪前端 Build 因測試中 SignalR 全域型別轉型而失敗，改為檢查可選欄位後通過。
+
 ## S7-2 P1 與 P3 審查修正（2026-11-21）
 
 - 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~FirstNewLookupMissAfterCooldownImmediatelyReturns120SecondRetry" --logger "trx;LogFileName=s7-2-review-p1-repro.trx"`。真 PostgreSQL 案例重現 1 例失敗，60 秒冷卻後第一個新錯碼預期 429、實際回 404。

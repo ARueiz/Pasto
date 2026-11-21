@@ -56,13 +56,15 @@
   - [x] 啟動盤點。使用者確認 Dev Tunnel 即時同步測試通過。已建立 SignalR、日誌、遙測與受保護 REST 的驗證基線。
   - [x] S7-1 憑證查詢防護：查無憑證才扣來源失敗額度，REST 與 SignalR 共用 DB 保護底線。查無快取讓重複舊憑證直接回 401，跨房 REST 請求扣 Participant 讀取額度。P1 的 F1～F4 複核通過，無新 findings。已提交至 `feature/s7-credential-admission@0811f17`。
   - [x] S7-2 公開加入與猜碼防護。重犯退避、冷卻表滿載與同 NAT 30 人加入的修正已通過複核。
-  - [ ] S7-3 SignalR 常駐連線配額、negotiate 速率與 `SubscribeRoom` 限流。
+  - [x] S7-3 SignalR 常駐連線配額、negotiate 速率與 `SubscribeRoom` 限流。WebSocket 強制使用協商取得的 token，Origin 驗收與獨立複核通過。
   - [ ] S7-4 HTTP 並行、過載 admission 與 partition 上限。
 - [ ] Deployment：同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose。
 - [ ] S8：壓測與收尾。
 - [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
 ## 最新驗證
+
+S7-3 審查修正後，專項 14 例、前兩批 29 例、受保護 REST 122 例、SignalR／日誌／遙測 22 例及完整 PostgreSQL 回歸 361 例均通過。沿用上一輪 Edge 38 例。 [命令與 TRX](docs/testing.md#s7-3-p2-與-p3-審查修正2026-11-21)
 
 S7-2 審查修正後，專項 14 例、S7 第一批 15 例、受保護 REST 122 例、SignalR／日誌／遙測 22 例及完整 PostgreSQL 回歸 347 例均通過。 [命令與 TRX](docs/testing.md#s7-2-p1-與-p3-審查修正2026-11-21)
 
@@ -121,7 +123,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S7-1 已提交，S7-2 已通過複核。下一步先確認 S7-3 的 SignalR 連線配額、negotiate 速率與訂閱限流實作方案。S7-4 另行處理。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#11-s7安全資源與監控整合)
+S7-1 與 S7-2 已提交，S7-3 已通過複核。下一步先確認 S7-4 的 HTTP 並行、過載 admission 與 partition 上限方案。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [實作計畫](docs/sprint-1-implementation-plan.md#11-s7安全資源與監控整合)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 

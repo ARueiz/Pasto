@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR;
 using Pasto.Server.Application.Rooms;
 
@@ -68,19 +69,26 @@ internal sealed class RoomHub(GetRoomState getRoomState, RoomConnections connect
         return base.OnDisconnectedAsync(exception);
     }
 
-    internal static async Task CheckOriginAsync(HttpContext context, RequestDelegate next)
+    internal static Task CheckRequestAsync(HttpContext context, RequestDelegate next)
     {
+        var metadata = context.GetEndpoint()?.Metadata;
+        if (metadata?.GetMetadata<HubMetadata>()?.HubType != typeof(RoomHub)) return next(context);
+
         var request = context.Request;
-        if ((request.Path == Path || request.Path == Path + "/negotiate") && request.Headers.TryGetValue("Origin", out var origin)
+        if (request.Headers.TryGetValue("Origin", out var origin)
             && (origin.Count != 1 || !Uri.TryCreate(origin[0], UriKind.Absolute, out var actual)
                 || !Uri.TryCreate($"{request.Scheme}://{request.Host}", UriKind.Absolute, out var expected)
                 || actual.UserInfo.Length != 0 || actual.PathAndQuery != "/" || actual.Fragment.Length != 0
                 || actual.GetLeftPart(UriPartial.Authority) != expected.GetLeftPart(UriPartial.Authority)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            return;
+            return Task.CompletedTask;
         }
 
-        await next(context);
+        if (context.WebSockets.IsWebSocketRequest && metadata.GetMetadata<NegotiateMetadata>() is null &&
+            (!request.Query.TryGetValue("id", out var ids) || ids.Count != 1 || string.IsNullOrWhiteSpace(ids[0])))
+            return ApiProblem.WriteAsync(context, StatusCodes.Status400BadRequest, "InvalidRequest");
+
+        return next(context);
     }
 }

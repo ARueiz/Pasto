@@ -42,8 +42,7 @@ internal sealed class ParticipantAuthenticationHandler(IOptionsMonitor<Authentic
                 ? header.Parameter : null;
         }
 
-        if (request.Path == RoomHub.Path && (context.WebSockets.IsWebSocketRequest
-                || (HttpMethods.IsGet(request.Method) && request.Headers.Accept == "text/event-stream"))
+        if (request.Path == RoomHub.Path && context.WebSockets.IsWebSocketRequest
             && request.Query.TryGetValue("access_token", out var token) && token.Count == 1)
             return token[0];
 

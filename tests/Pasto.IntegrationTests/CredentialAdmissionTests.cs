@@ -110,9 +110,12 @@ public sealed class CredentialAdmissionTests
     public async Task MappedIpv4SharesFailuresAndWebsocketUpgradeIsRejectedBeforeLookup()
     {
         await using var db = await PostgresTestDatabase.CreateAsync();
+        var room = await CreateRoomAsync(db);
         var queries = new VerifierQueries();
         await using var factory = Factory(db, queries, Settings(failureBurst: 1));
         using var client = factory.CreateClient();
+        using var negotiated = await SendAsync(factory, "192.0.2.8", "POST", RoomHubTests.NegotiatePath, room.Credential);
+        var id = Uri.EscapeDataString(await RoomHubTests.ReadConnectionTokenAsync(negotiated));
         await ExpectAsync(await SendAsync(factory, "192.0.2.8", "POST", Negotiate, Fake(1)), 401, "ParticipantUnauthorized");
         await ExpectAsync(await SendAsync(factory, "::ffff:192.0.2.8", "POST", Negotiate, Fake(2)), 429, MoveToCooldown);
         var ws = factory.Server.CreateWebSocketClient();
@@ -123,9 +126,9 @@ public sealed class CredentialAdmissionTests
         };
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await ws.ConnectAsync(new Uri($"ws://localhost/hubs/room?access_token={Fake(3)}"), cancel.Token));
+            await ws.ConnectAsync(new Uri($"ws://localhost/hubs/room?id={id}&access_token={Fake(3)}"), cancel.Token));
         Assert.Contains("429", error.Message);
-        Assert.Equal(1, queries.Count);
+        Assert.Equal(2, queries.Count);
     }
 
     [Theory]
@@ -134,10 +137,13 @@ public sealed class CredentialAdmissionTests
     public async Task WebsocketUpgradeSharesSourceAndGlobalDatabaseFloor(bool global)
     {
         await using var db = await PostgresTestDatabase.CreateAsync();
+        var room = await CreateRoomAsync(db);
         var queries = new VerifierQueries();
-        var settings = Settings(sourceBurst: global ? 10 : 1, globalBurst: global ? 1 : 10);
+        var settings = Settings(sourceBurst: global ? 10 : 2, globalBurst: global ? 2 : 10);
         await using var factory = Factory(db, queries, settings);
         using var client = factory.CreateClient();
+        using var negotiated = await SendAsync(factory, SourceA, "POST", RoomHubTests.NegotiatePath, room.Credential);
+        var id = Uri.EscapeDataString(await RoomHubTests.ReadConnectionTokenAsync(negotiated));
         var location = $"/api/rooms/{Guid.NewGuid()}/me";
         await ExpectAsync(await SendAsync(factory, SourceA, "GET", location, Fake(1)), 401);
         var source = global ? SourceB : SamePrefix;
@@ -150,9 +156,9 @@ public sealed class CredentialAdmissionTests
         };
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await ws.ConnectAsync(new Uri($"ws://localhost/hubs/room?access_token={Fake(3)}"), cancel.Token));
+            await ws.ConnectAsync(new Uri($"ws://localhost/hubs/room?id={id}&access_token={Fake(3)}"), cancel.Token));
         Assert.Contains("429", error.Message);
-        Assert.Equal(1, queries.Count);
+        Assert.Equal(2, queries.Count);
     }
 
     [Fact]

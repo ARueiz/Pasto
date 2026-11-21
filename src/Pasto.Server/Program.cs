@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -56,7 +57,10 @@ builder.Services.AddSingleton(services =>
 });
 builder.Services.AddSingleton<IRoomCleanupStore>(services => services.GetRequiredService<RoomCleanupStore>());
 builder.Services.AddSingleton<CleanUpRooms>();
-builder.Services.AddSingleton<RoomConnections>();
+builder.Services.AddOptions<HubAdmissionOptions>().BindConfiguration("Api:Hub")
+    .Validate(options => options.IsValid(), "SignalR connection limits and timeout must be valid.").ValidateOnStart();
+builder.Services.AddSingleton(services => new RoomConnections(services.GetRequiredService<ILogger<RoomConnections>>(),
+    services.GetRequiredService<IOptions<HubAdmissionOptions>>().Value.GlobalConnections));
 builder.Services.AddSingleton<RoomCleanupStatus>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<RoomCleanupWorker>();
@@ -96,7 +100,18 @@ builder.Services.AddAuthentication(ParticipantAuthenticationHandler.SchemeName)
         ParticipantAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<RoomHubFailureFilter>();
-builder.Services.AddSignalR().AddHubOptions<RoomHub>(options => options.AddFilter<RoomHubFailureFilter>());
+builder.Services.AddSingleton<HubConnectionQuota>();
+builder.Services.AddSingleton<HubNegotiateLimiter>();
+builder.Services.AddSingleton<RoomHubAdmission>();
+builder.Services.AddSignalR().AddHubOptions<RoomHub>(options =>
+{
+    options.AddFilter<RoomHubAdmission>();
+    options.AddFilter<RoomHubFailureFilter>();
+});
+builder.Services.AddOptions<HubOptions<RoomHub>>().Configure<IOptions<HubAdmissionOptions>>((options, admission) =>
+{
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(admission.Value.ClientTimeoutSeconds);
+});
 builder.Services.AddSingleton<RoomChangeNotifications>();
 builder.Services.AddOptions<CreateRoomOptions>()
     .Bind(builder.Configuration.GetSection("RoomCreation"))
@@ -121,20 +136,21 @@ app.UseStatusCodePages(status => ApiProblem.WriteAsync(status.HttpContext,
     status.HttpContext.Response.StatusCode == 413 ? "RequestBodyTooLarge" : "InvalidRequest"));
 app.UseForwardedHeaders();
 app.UseWebSockets();
-app.Use(RoomHub.CheckOriginAsync);
 app.UseRouting();
+app.Use(RoomHub.CheckRequestAsync);
 app.UseMiddleware<PublicJoinAdmission>();
 app.UseMiddleware<ParticipantCredentialAdmission>();
 app.UseRateLimiter();
 app.Use(PublicJoinAdmission.ApplyPressureAsync);
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<HubNegotiateAdmission>();
 app.MapRoomCreation();
 app.MapParticipants();
 app.MapRoomStateAndClosure();
 app.MapItems();
 app.MapPastoHealth();
-app.MapHub<RoomHub>(RoomHub.Path).RequireAuthorization();
+app.MapHub<RoomHub>(RoomHub.Path, options => options.Transports = HttpTransportType.WebSockets).RequireAuthorization();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
 app.Run();
 

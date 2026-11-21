@@ -1,4 +1,4 @@
-import { DefaultHttpClient, HttpError, HubConnectionBuilder, HubConnectionState, LogLevel, NullLogger } from '@microsoft/signalr';
+import { DefaultHttpClient, HttpError, HttpTransportType, HubConnectionBuilder, HubConnectionState, LogLevel, NullLogger } from '@microsoft/signalr';
 import type { HttpRequest } from '@microsoft/signalr';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, invalidRoom } from './api';
@@ -10,9 +10,17 @@ type RoomChanged = { roomId: string; version: string };
 const coalesceMs = 150;
 const pollDelay = () => 15_000 + Math.random() * 5_000;
 const reconnectDelay = (attempt: number) => Math.min(20_000, 1_000 * 2 ** attempt) * (0.5 + Math.random() / 2);
+const connectionLimit = 'HubConnectionLimitReached';
+const connectionLimitDelaySeconds = 30;
+const subscriptionLimit = 'SubscribeRateLimited';
+
+function hasHubError(error: unknown, code: string) {
+  return error instanceof Error && error.message.endsWith(`HubException: ${code}`);
+}
 
 class RoomHubHttpClient extends DefaultHttpClient {
-  constructor(private readonly onUnauthorized: () => void) {
+  constructor(private readonly onUnauthorized: () => void,
+    private readonly onThrottled: (seconds: number, atCapacity: boolean) => void) {
     super(NullLogger.instance);
   }
 
@@ -21,9 +29,26 @@ class RoomHubHttpClient extends DefaultHttpClient {
       return await super.send(request);
     } catch (error) {
       // SignalR wraps negotiate errors before exposing them to the connection callbacks.
-      if (error instanceof HttpError && error.statusCode === 401 && request.url &&
-        new URL(request.url).pathname === '/hubs/room/negotiate') this.onUnauthorized();
+      if (error instanceof HttpError && request.url &&
+        new URL(request.url).pathname === '/hubs/room/negotiate') {
+        if (error.statusCode === 401) this.onUnauthorized();
+        if (error.statusCode === 429) this.handleThrottle(error.message);
+      }
       throw error;
+    }
+  }
+
+  private handleThrottle(body: string) {
+    try {
+      // SignalR 的 HttpError 保留 JSON 內容，讓這裡讀取伺服器的退避秒數。
+      const problem: { code?: string; retryAfterSeconds?: number } | null =
+        JSON.parse(body.replace(/: Status code '429'$/, ''));
+      const seconds = problem?.retryAfterSeconds;
+      const atCapacity = problem?.code === connectionLimit;
+      if (atCapacity || (typeof seconds === 'number' && Number.isSafeInteger(seconds) && seconds > 0))
+        this.onThrottled(typeof seconds === 'number' && Number.isSafeInteger(seconds) ? seconds : 0, atCapacity);
+    } catch {
+      // 代理也可能回非 JSON 的 429，沿用一般的重試排程。
     }
   }
 }
@@ -38,14 +63,18 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
     // 每次入房使用獨立生命週期，只有仍有效的工作才能更新畫面。
     const lifetime = new AbortController();
     const { signal } = lifetime;
+    let hubRetryAt = 0;
     const connection = new HubConnectionBuilder()
       .withUrl('/hubs/room', {
         accessTokenFactory: () => session.credential,
         withCredentials: false,
-        httpClient: new RoomHubHttpClient(() => invalidate('identity')),
+        transport: HttpTransportType.WebSockets,
+        httpClient: new RoomHubHttpClient(() => invalidate('identity'), deferHubRetry),
       })
-      .withAutomaticReconnect({ nextRetryDelayInMilliseconds: ({ previousRetryCount }) =>
-        previousRetryCount < 5 ? reconnectDelay(previousRetryCount) : null })
+      .withAutomaticReconnect({ nextRetryDelayInMilliseconds: ({ previousRetryCount, retryReason }) => {
+        recordCloseError(retryReason);
+        return previousRetryCount < 5 ? Math.max(reconnectDelay(previousRetryCount), hubRetryAt - performance.now()) : null;
+      } })
       .configureLogging(LogLevel.None)
       .build();
     let displayed = -1n;
@@ -61,6 +90,7 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
     let retries = 0;
     let pollTimer: number | undefined;
     let startTimer: number | undefined;
+    let subscribeTimer: number | undefined;
     let startAttempts = 0;
     let starting = false;
 
@@ -159,7 +189,18 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
       if (signal.aborted || connection.state !== HubConnectionState.Connected) return;
       subscribed = true;
       startAttempts = 0;
+      hubRetryAt = 0;
       requestSnapshot(undefined, 0);
+    }
+
+    function deferHubRetry(seconds: number, atCapacity: boolean) {
+      const delay = atCapacity ? Math.max(connectionLimitDelaySeconds, seconds) * 1_000 + Math.random() * 5_000 : seconds * 1_000;
+      hubRetryAt = Math.max(hubRetryAt, performance.now() + delay);
+    }
+
+    function recordCloseError(error: unknown) {
+      if (hasHubError(error, connectionLimit) && hubRetryAt <= performance.now())
+        deferHubRetry(connectionLimitDelaySeconds, true);
     }
 
     function restartLater() {
@@ -167,10 +208,12 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
       startTimer = window.setTimeout(() => {
         startTimer = undefined;
         void start();
-      }, reconnectDelay(Math.min(startAttempts++, 5)));
+      }, Math.max(reconnectDelay(Math.min(startAttempts++, 5)), hubRetryAt - performance.now()));
     }
 
     function disconnected() {
+      window.clearTimeout(subscribeTimer);
+      subscribeTimer = undefined;
       subscribed = false;
       if (!signal.aborted) setStatus('disconnected');
     }
@@ -181,11 +224,20 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
       onInvalid(kind);
     }
 
-    async function recoverSubscription() {
+    async function recoverSubscription(error: unknown) {
       if (signal.aborted) return;
+      recordCloseError(error);
       disconnected();
       if (displayed < 0n) requestSnapshot(undefined, 0);
       else check();
+      if (hasHubError(error, subscriptionLimit) && connection.state === HubConnectionState.Connected) {
+        subscribeTimer = window.setTimeout(() => {
+          subscribeTimer = undefined;
+          if (!signal.aborted && connection.state === HubConnectionState.Connected)
+            void subscribe().catch(recoverSubscription);
+        }, 6_000);
+        return;
+      }
       await connection.stop();
       restartLater();
     }
@@ -193,12 +245,16 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
     async function start() {
       if (signal.aborted || starting || startTimer !== undefined || !navigator.onLine ||
         connection.state !== HubConnectionState.Disconnected) return;
+      if (hubRetryAt > performance.now()) {
+        restartLater();
+        return;
+      }
       starting = true;
       try {
         await connection.start();
         if (!signal.aborted) await subscribe();
-      } catch {
-        await recoverSubscription();
+      } catch (error) {
+        await recoverSubscription(error);
       } finally {
         starting = false;
       }
@@ -235,6 +291,7 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
       round?.abort();
       window.clearTimeout(roundTimer);
       window.clearTimeout(startTimer);
+      window.clearTimeout(subscribeTimer);
       window.clearTimeout(pollTimer);
       document.removeEventListener('visibilitychange', foreground);
       window.removeEventListener('online', foreground);
@@ -249,8 +306,9 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
     });
     connection.onreconnecting(disconnected);
     connection.onreconnected(() => { void subscribe().catch(recoverSubscription); });
-    connection.onclose(() => {
+    connection.onclose(error => {
       if (signal.aborted) return;
+      recordCloseError(error);
       disconnected();
       if (navigator.onLine) check();
       restartLater();
