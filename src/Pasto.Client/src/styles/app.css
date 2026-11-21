@@ -100,7 +100,8 @@ small { font-size: var(--text-sm); }
 }
 .message-group { display: flow-root; }
 .date-divider { text-align: center; color: var(--fg-muted); font-size: var(--text-sm); margin-block: var(--space-2) var(--space-3); }
-.message { display: grid; width: fit-content; max-width: min(var(--bubble-max-width), var(--bubble-max-size)); gap: var(--space-1); }
+/* Keep visually hidden author labels within the chat scroll container. */
+.message { position: relative; display: grid; width: fit-content; max-width: min(var(--bubble-max-width), var(--bubble-max-size)); gap: var(--space-1); }
 .message.mine { margin-inline-start: auto; }
 .speaker { color: var(--fg-muted); font-size: var(--text-sm); padding-inline: var(--space-1); }
 @supports (color: light-dark(black, white)) {

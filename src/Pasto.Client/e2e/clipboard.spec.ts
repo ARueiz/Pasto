@@ -515,6 +515,20 @@ test('after snapshot retries are exhausted, the room can still add and delete it
   await expect(page.getByText('已同步', { exact: true })).toBeVisible();
 });
 
+test('grouped messages overflow inside the chat without scrolling the document', async ({ page }) => {
+  await page.setViewportSize({ width: 566, height: 570 });
+  const state = await mockApi(page);
+  state.items = Array.from({ length: 20 }, (_, index) =>
+    makeItem(String(20 - index), `訊息 ${20 - index}`, false));
+  await page.goto('/r/ABC123');
+
+  const chat = page.getByRole('main', { name: '房間文字' });
+  await expect(chat.getByRole('article', { name: guest.authorCode })).toHaveCount(20);
+  expect(await chat.evaluate(element => element.scrollHeight - element.clientHeight)).toBeGreaterThan(100);
+  expect(await page.evaluate(() =>
+    document.documentElement.scrollHeight - document.documentElement.clientHeight)).toBe(0);
+});
+
 test('the POST response scrolls to an already displayed write and later remote hints preserve position', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 500 });
   const state = await mockApi(page);
