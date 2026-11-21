@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
 using Pasto.Server.Application.Rooms;
 
@@ -23,9 +22,8 @@ internal sealed class ParticipantCredentialAdmission(RequestDelegate next, Parti
             var retryAfter = failures.Check(credential, out var cachedMiss);
             if (retryAfter is int seconds)
             {
-                context.Features.Get<IHttpMetricsTagsFeature>()?.Tags.Add(new("pasto.rate_limit.reason", "credential_failure"));
                 failures.ReportRejection();
-                await CreationRateLimiting.RejectAsync(context, seconds, "CredentialFailureRateLimited");
+                await CreationRateLimiting.RejectAsync(context, seconds, "CredentialFailureRateLimited", "credential_failure");
                 return;
             }
             // Cache hits reach the normal 401 challenge without using the DB floor or verifier.

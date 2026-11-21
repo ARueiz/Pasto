@@ -1,15 +1,17 @@
 using System.Globalization;
 using System.Net.Sockets;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Pasto.Server.Api;
 
 internal static class CreationRateLimiting
 {
-    internal static Task RejectAsync(HttpContext context, int retryAfterSeconds, string code)
-        => Rejection(context, retryAfterSeconds, code).ExecuteAsync(context);
+    internal static Task RejectAsync(HttpContext context, int retryAfterSeconds, string code, string reason)
+        => Rejection(context, retryAfterSeconds, code, reason).ExecuteAsync(context);
 
-    internal static IResult Rejection(HttpContext context, int retryAfterSeconds, string code)
+    internal static IResult Rejection(HttpContext context, int retryAfterSeconds, string code, string reason)
     {
+        context.Features.Get<IHttpMetricsTagsFeature>()?.Tags.Add(new("pasto.rate_limit.reason", reason));
         context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
         return ApiProblem.Create(context, 429, code);
     }

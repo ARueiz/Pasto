@@ -14,7 +14,7 @@ internal sealed class ParticipantWriteFilter(ParticipantRateLimits limiter) : IE
         var profile = crossRoom ? ParticipantRateProfile.Read :
             HttpMethods.IsPost(http.Request.Method) ? ParticipantRateProfile.Add : ParticipantRateProfile.Delete;
         if (limiter.TryTake(identity.ParticipantId, profile) is int retry)
-            return CreationRateLimiting.Rejection(http, retry, "RateLimited");
+            return CreationRateLimiting.Rejection(http, retry, "RateLimited", "participant_rate");
         if (crossRoom) return ApiProblem.Create(http, 403, "ParticipantUnauthorized");
         return await next(context);
     }

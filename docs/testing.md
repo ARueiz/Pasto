@@ -1,5 +1,15 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S7 整合審查 P3 修正（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~ExportedHttpMetricsDistinguishOverloadReasonsFromStorageFailure" --logger "trx;LogFileName=s7-metrics-p3-repro.trx"`，1 例預期失敗。HTTP 503 雖分別由硬上限、過載高水位與儲存失敗觸發，匯出時三者聚合成同一點。
+- 匯出測試使用正式 OpenTelemetry view，透過本機測試 exporter 擷取聚合後的 metric points。503 的 `in_flight`、`high_watermark` 與沒有過載標籤的儲存失敗各自保留。429 驗證建房／Join、DB 底線、Participant 配額的固定原因。Join 測試另確認 JSON 語法錯誤回 400，來源與全站 Join 桶仍各有原本的額度。
+- 首輪相關測試 `s7-metrics-p3-focused.trx` 為 48 通過、1 失敗。測試的 OpenTelemetry reader 依 meter 名稱訂閱，同時收到平行測試主機的 429。將匯出驗收置於停用平行執行的測試集合後重跑。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~TelemetryTests|FullyQualifiedName~CredentialAdmissionTests|FullyQualifiedName~PublicJoinAdmissionTests|FullyQualifiedName~HttpWorkAdmissionTests" --logger "trx;LogFileName=s7-metrics-p3-verified.trx"`，49 通過、0 失敗、0 略過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s7-metrics-p3-full.trx"`，完整 PostgreSQL 回歸 385 通過、0 失敗、0 略過。
+- `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- 本輪修改後端、測試與文件，前端 Lint、Build、Edge 未重跑。
+
 ## S7 P1 速率桶連續補充（2026-11-21）
 
 - 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~ApiRateBucketTests" --logger "trx;LogFileName=s7-rate-refill-p1-repro.trx"`，九種預設 API 桶均重現失敗。每分鐘週期的桶在 burst 耗盡後仍回 60 秒，`JoinGlobal` 在 50 ms 後也沒有可用額度。

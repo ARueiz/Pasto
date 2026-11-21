@@ -227,6 +227,8 @@ HTTP limiter 不涵蓋每次 Hub invocation；`SubscribeRoom` 在 DB 查詢前�
 
 REST endpoint filter 在參數綁定與憑證驗證後取得處理名額，產出 `IResult` 後釋放，框架之後再序列化與寫出回應。建房／Join 的速率桶則在取得處理名額後扣額，避免 `Overloaded` 重試重複扣費。negotiate 在驗證後取得讀取類名額，於 `OnStarting` 釋放，例外或取消時由同一份可重複呼叫的 lease 保底。WebSocket 升級請求全程使用憑證底線、先前協商與專用 Hub 配額。in-flight 的來源狀態隨最後一筆工作結束移除；來源表滿載時，表外來源仍受全站與分類上限。
 
+匯出的 `http.server.request.duration` 以固定原因區分拒絕。503 `Overloaded` 的 `pasto.admission.reason` 為 `in_flight` 或 `high_watermark`。429 的 `pasto.rate_limit.reason` 包括 `database_floor`、`source_rate`（建房／Join 速率）與 `participant_rate`，不帶使用者輸入、IP 或身分。
+
 | 資源 | 現有機制與訊號 | 503 |
 | --- | --- | --- |
 | HTTP 處理中 | 真實全站、分類與來源計數，及全站高／低水位遲滯 | 超限或暫停建房／加入時回 `Overloaded` |

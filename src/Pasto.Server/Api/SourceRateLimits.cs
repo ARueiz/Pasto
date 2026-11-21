@@ -48,7 +48,7 @@ internal sealed class SourceRateLimits(IOptions<ApiOptions> options, TimeProvide
         if (ParticipantCredentialAdmission.Prepared(context) is not null &&
             context.RequestServices.GetRequiredService<SourceRateLimits>()
                 .TryTake(SourceRateProfile.Database, CreationRateLimiting.IpKey(context)) is int retry)
-            return CreationRateLimiting.RejectAsync(context, retry, "RateLimited");
+            return CreationRateLimiting.RejectAsync(context, retry, "RateLimited", "database_floor");
         return next(context);
     }
 }

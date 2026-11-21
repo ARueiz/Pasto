@@ -51,8 +51,7 @@ internal static class ItemEndpoints
             }
             catch (RoomAddRateLimitedException denied)
             {
-                context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMetricsTagsFeature>()?.Tags.Add(new("pasto.rate_limit.reason", "room_add"));
-                return CreationRateLimiting.Rejection(context, denied.RetryAfterSeconds, "RateLimited");
+                return CreationRateLimiting.Rejection(context, denied.RetryAfterSeconds, "RateLimited", "room_add");
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {

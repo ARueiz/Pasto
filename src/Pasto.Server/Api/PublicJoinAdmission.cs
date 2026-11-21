@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
-using Microsoft.AspNetCore.Http.Features;
 using Pasto.Server.Application.Rooms;
 
 namespace Pasto.Server.Api;
@@ -21,10 +20,7 @@ internal sealed class PublicJoinAdmission(RequestDelegate next, JoinSourceCooldo
         => context.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == ParticipantEndpoints.JoinName;
 
     internal static IResult Rejection(HttpContext context, int seconds, string reason)
-    {
-        context.Features.Get<IHttpMetricsTagsFeature>()?.Tags.Add(new("pasto.rate_limit.reason", reason));
-        return CreationRateLimiting.Rejection(context, seconds, "RateLimited");
-    }
+        => CreationRateLimiting.Rejection(context, seconds, "RateLimited", reason);
 }
 
 internal sealed class JoinSourceCooldown(TimeProvider clock, ILogger<JoinSourceCooldown> logger, int capacity = 20_000)

@@ -149,7 +149,7 @@ internal static class HttpWorkEndpoints
                 var isJoin = http.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == ParticipantEndpoints.JoinName;
                 var profile = isJoin ? SourceRateProfile.Join : SourceRateProfile.Create;
                 if (services.GetRequiredService<SourceRateLimits>().TryTake(profile, source) is int seconds)
-                    return CreationRateLimiting.Rejection(http, seconds, "RateLimited");
+                    return CreationRateLimiting.Rejection(http, seconds, "RateLimited", "source_rate");
                 if (isJoin && services.GetRequiredService<JoinPressureLimiter>().Check() is int pressureRetry)
                     return PublicJoinAdmission.Rejection(http, pressureRetry, "join_pressure");
             }
