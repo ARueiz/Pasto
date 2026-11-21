@@ -117,7 +117,7 @@ public sealed class HttpWorkAdmissionTests
         Assert.Equal(1800, limiter.TryTake(profile, "tracked"));
         Assert.Null(limiter.TryTake(profile, "untracked"));
         Assert.Null(limiter.TryTake(profile, "untracked"));
-        Assert.Equal(1800, limiter.TryTake(profile, "other"));
+        Assert.Equal(600, limiter.TryTake(profile, "other"));
         clock.Advance(TimeSpan.FromMinutes(10));
         Assert.Equal(1200, limiter.TryTake(profile, "tracked"));
         clock.Advance(TimeSpan.FromMinutes(20));

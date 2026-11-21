@@ -155,7 +155,7 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 驗收：
 
 - AC-13／AC-15：多來源猜碼、連續錯碼、NAT 合法使用者、偽造 X-Forwarded-For、無效 Credential 及直接 Hub invocation 有預期防護，429／Retry-After、503 明確。
-- S7 第一批已以每來源失敗計費與查無憑證快取降低無效憑證的 DB 查詢。REST 讀寫、SignalR negotiate 與 WebSocket handshake 共用 DB 保護底線。單來源查詢與扣費間的併發窗口可達 burst 1,000。大量 /64 仍可能打滿全站底線，耗盡後合法讀寫及重連都可能收到 429。共用 NAT 會共用失敗桶，跨房請求會消耗自己的 Participant 讀取配額。S8 驗證重連與負載：一次成功重連約需 negotiate、WebSocket 與快照各 1 token，千人同時重連約 3,000 token，高於全站 burst 2,000。實際被拒比例、補充時序、額外 REST 請求與恢復時間須實測。 [設定、快取及 partition 限制](s2-api-identity.md#s7-第一批失敗計費)
+- S7 第一批已以每來源失敗計費與查無憑證快取降低無效憑證的 DB 查詢。REST 讀寫、SignalR negotiate 與 WebSocket handshake 共用 DB 保護底線。單來源查詢與扣費間的併發窗口可達 burst 1,000。大量 /64 仍可能打滿全站底線，耗盡後合法讀寫及重連都可能收到 429。共用 NAT 會共用失敗桶，跨房請求會消耗自己的 Participant 讀取配額。千人重連估計需要約 3,000 格 DB 底線額度，negotiate、WebSocket 與快照各需一格。P1 修正後，全站 DB 底線初始 burst 為 2,000，並連續每秒補約 1,000 格。此估算只計 DB 底線。S8 將併同協商速率、連線及 HTTP 處理上限，量測實際被拒比例、額外 REST 請求與恢復時間。 [設定、快取及 partition 限制](s2-api-identity.md#s7-第一批失敗計費)
 - 分享連結持有者可反覆 Join 耗盡 1000 個生命週期名額。公開部署前需做濫用測試、提出防護與資料預算取捨，不將 Participant 上限當成防濫用保證，也不能刪被文字引用的 Participant 來繞過預算。
 - S7-2 剩餘風險：攻擊者以大量 /64 輪流送錯碼，可在恢復期反覆觸發壓力，使全站長期處於壓力模式。壓力期間若攻擊者持續送出每秒 2 次以上的請求，大部分合法 Join 會被拒，使用者需要重試。S8 量測壓力模式下合法 Join 的成功率與延遲。
 - partition／失敗記錄達上限仍有界。一般配額的新鍵使用保守共用桶。驗證前的憑證失敗來源表滿載時，新來源退回既有 DB 底線，避免驗證前的共用桶耗盡時把有效憑證一起擋下。滿載期間的新來源暫停失敗計費。通知／Client dirty／伺服器連線追蹤不因輸入數量無界成長。 [第一批剩餘風險](s2-api-identity.md#s7-第一批失敗計費)

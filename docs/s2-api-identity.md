@@ -135,3 +135,7 @@ S2-02 findings 已處理，Claude 最終靜態審查無阻擋事項；這不代�
 新增 RoomStateApiTests 33 例：字串版本、資料不洩漏、缺少／無效／跨房憑證、失效房間、權限順序、共用配額、驗證前限流、未提交寫入期間的讀取、實體清理競爭、併發關房與提交失敗／取消。既有 Join 提交故障 interceptor 原樣搬至 TransactionTestHooks，供 HTTP 關房共用。
 
 實作方實測：Release Build 0 warning／0 error，相關 33 passed，完整 228 passed／0 failed／0 skipped，format verify 與 diff check 通過；殘留 schema 為 0。TRX 見 testing.md。S2-03 待獨立 review；S3 尚未開始。沒有 schema、Migration 或相依變更，S7 配額與濫用風險維持原狀。
+
+## S7 P1 持續速率修正
+
+S2 的實際額度比表列設定嚴格。整週期補充會被 `TokenLimit` 截斷，例如 `ReadGlobal` 實際每分鐘只補 2,000 格，`ReadPerParticipant` 只補 40 格，S3 的新增桶只補 10 格。P1 改為按經過時間連續補充，保留未滿一格的餘額，持續速率才符合設定中的 `TokensPerPeriod / PeriodSeconds`，且 burst 仍由 `TokenLimit` 決定。`JoinGlobal` 原本的長期平均已是每秒 30 格，現在也平滑補充。 [現行需求與配額](requirements.md#5-初始安全與資源設定待安全測試與壓測調整)

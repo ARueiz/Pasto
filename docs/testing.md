@@ -1,5 +1,14 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## S7 P1 速率桶連續補充（2026-11-21）
+
+- 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~ApiRateBucketTests" --logger "trx;LogFileName=s7-rate-refill-p1-repro.trx"`，九種預設 API 桶均重現失敗。每分鐘週期的桶在 burst 耗盡後仍回 60 秒，`JoinGlobal` 在 50 ms 後也沒有可用額度。
+- 修正後 `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --filter "FullyQualifiedName~ApiRateBucketTests|FullyQualifiedName~FullSourceRateTableLeavesNewSourcesSubjectOnlyToCorrespondingGlobalBucket|FullyQualifiedName~FullParticipantTableFailsOpenAndReclaimsOnlyAfterAllBucketsRefill" --logger "trx;LogFileName=s7-rate-refill-p1-focused.trx"`，13 通過、0 失敗、0 略過。以可控時間測試耗盡 burst、部分週期補額、保留餘額、下一格的精確邊界及長時間閒置後的容量上限。
+- 既有來源表滿載測試的三種 profile 共用一項調整。每 1,800 秒補三格的全站桶，耗盡後下一格由原先預期的 1,800 秒改為 600 秒。每 1,800 秒補一格的來源桶及 Participant 桶的等待斷言維持原值。
+- `dotnet test Pasto.slnx -c Release --no-build --no-restore --logger "trx;LogFileName=s7-rate-refill-p1-full.trx"`，完整 PostgreSQL 回歸 383 通過、0 失敗、0 略過。
+- 在 `src/Pasto.Client` 執行 `npm.cmd run test:ui -- --workers=1 --reporter=line`，Edge 44 通過。本次 P1 修改限後端、測試及文件。獨立複核核對補額、整秒等待、長時間不溢位與專項 TRX，無阻擋項。
+
 ## S7-4 HTTP 處理名額與過載重試（2026-11-21）
 
 - `dotnet build Pasto.slnx -c Release --no-restore` 零警告、零錯誤。`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。首輪格式檢查指出新增測試的初始化器須換行，修正後通過。

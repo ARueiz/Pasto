@@ -86,13 +86,15 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 
 以下都是可設定的實驗起點。依 [ADR 0003](decisions/0003-mvp-scope-reduction.md)，MVP 只實作「公開建房」、「公開加入／猜碼」的 token bucket、「已驗證 REST」的新增／刪除限制、「每房寫入／新 Participant」的 Participant 上限與「DB pool」；其餘列於 S7 依安全測試／壓測補齊，補齊前不發布公開站台。Token bucket 表示持續補充速率與最大 burst；時間窗／失敗計數另明定。拒絕回 429／Retry-After；過載回 503。公開入口不新增獨立的「查房是否存在」介面，查詢／加入共用防護。
 
+S2 起的實作在整個週期結束時才補額。當補充量大於 burst，每個週期最多只能回補一個 burst，實際比表列嚴格。例如全站 DB 底線實際每分鐘只補 2,000 格。S7 的 P1 修正改為按經過時間連續補充，保留原有 burst 上限，現在全站 DB 底線每分鐘補 60,000 格（每秒 1,000）。`Retry-After` 為補足下一格所需時間，向上取整秒。
+
 | 層 | 候選初始值 | 理由／限制 |
 | --- | --- | --- |
 | 公開建房 | 每 IP 每分鐘 30 次，burst 10；全站每分鐘 120 次，burst 20（token bucket） | 建房有資料成本，但共用 NAT 下多個小組仍需能分批建房；1,000 人／200 房壓測須記錄暖機過程，不能把此額度當既有身分的讀取限制 |
 | 公開加入／猜碼 | 每 IP 每分鐘 120 次，burst 30；全站每秒 30 次，burst 60（token bucket），成功／失敗皆計入 | 來源 burst 與每房 burst 同為 30，讓同一 NAT 的 30 人可同時加入。千人新加入需分批暖機 |
 | 連續無效嘗試 | 依 IPv4 /32、IPv6 /64 分組，滾動 10 分鐘內累積 20 個不同的無效格式／不存在／失效碼後，公開 Join 冷卻 60 秒；重犯依序退避到 120、240、300 秒 | S7-2 將冷卻範圍限定為公開 Join。建房不接收房碼，限制建房無助防猜碼，也會影響同 NAT 的房主。已驗證 REST 與 Hub 維持各自的配額 |
 | 跨來源防護 | 全站滾動 1 分鐘累積 300 次實際查詢後的查無／失效結果時，公開 Join 降為每秒 2 次、burst 5，至少 60 秒；同一視窗低於門檻後以每秒 10 次、burst 20 恢復 60 秒，再回到原額度 | 恢復階段再次達門檻會重新開始至少 60 秒的壓力模式。全站逐筆計算查詢結果，反映 DB 負載。格式無效在查詢前拒絕，只計入來源。被冷卻或任一前置桶拒絕的請求不計入 |
-| 已驗證 REST | 每 Participant 讀取每分鐘 240 次／burst 40，新增每分鐘 30 次／burst 10，刪除每分鐘 60 次／burst 10（token bucket）；每 IP 合計每分鐘 30,000 次／burst 1,000 作粗上限 | 為輪詢及分頁補償留餘裕；不把 IP 當身分，新加入可換 Participant，仍需房間與全站保護 |
+| 已驗證 REST | 每 Participant 讀取每分鐘 240 次／burst 40，新增每分鐘 30 次／burst 10，刪除每分鐘 60 次／burst 10（token bucket）；DB 底線每來源每分鐘 30,000 次／burst 1,000，全站每分鐘 60,000 次／burst 2,000 | 為輪詢及分頁補償留餘裕。DB 底線也由 SignalR negotiate 與 WebSocket handshake 共用 |
 | 每房寫入／新 Participant | 新增文字每分鐘 120 次／burst 20；Join 每分鐘 30 次／burst 30；生命週期 Participant 最多 1,000 筆（房主計入） | 新增與 Join 各有依內部 Room ID 計算的桶，在房間列鎖內檢查，寫入成功後、commit 前扣額。每筆刪除以前一次新增為前提，因此刪除沿用每 Participant 每分鐘 60 次的配額，房間新增桶滿時仍可清理。原 Credential 恢復沿用 /me |
 | SignalR 連線 | 全站 1,500、每來源 30（IPv4 /32、IPv6 /64）、每房 100、每 Participant 3 條同時連線 | negotiate 預檢，WebSocket 帶協商取得的 `connectionToken` 作為 `id`，`OnConnectedAsync` 原子取得名額。同 NAT 超過 30 條時，額外的用戶端繼續以 REST 輪詢 |
 | 協商／Hub 訂閱 | 已驗證協商每來源每秒 50 次／burst 100、全站每秒 100 次／burst 200；`SubscribeRoom` 每連線每分鐘 10 次／burst 3（token bucket） | 缺少或格式錯誤的 Credential 直接回 401，且不扣協商額度。其他驗證前流量沿用 S7-1。協商來源表上限 5,000 筆，閒置 10 分鐘且額度已回滿後回收；表外來源走全站協商速率 |

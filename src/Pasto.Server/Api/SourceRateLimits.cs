@@ -53,39 +53,58 @@ internal sealed class SourceRateLimits(IOptions<ApiOptions> options, TimeProvide
     }
 }
 
-// Refill in fixed periods, retaining each existing bucket's configured rate and burst.
-internal sealed class ApiRateBucket(BucketOptions settings)
+internal sealed class ApiRateBucket
 {
-    private readonly long period = TimeSpan.FromSeconds(settings.PeriodSeconds).Ticks;
-    private int tokens = settings.TokenLimit;
-    private long? lastRefill;
+    // 一格以週期的 tick 數表示，每個經過的 tick 補 TokensPerPeriod 個單位。
+    // 用整數保留未滿一格的餘額，避免在補額邊界受到浮點誤差影響。
+    private readonly long unitsPerToken;
+    private readonly long capacity;
+    private readonly int unitsPerTick;
+    private long balance;
+    private long lastRefill;
     internal TimeSpan LastUsed { get; private set; }
+
+    internal ApiRateBucket(BucketOptions settings)
+    {
+        unitsPerToken = TimeSpan.FromSeconds(settings.PeriodSeconds).Ticks;
+        unitsPerTick = settings.TokensPerPeriod;
+        capacity = unitsPerToken * settings.TokenLimit;
+        balance = capacity;
+    }
 
     internal bool IsFull(TimeSpan now)
     {
         Refill(now);
-        return tokens == settings.TokenLimit;
+        return balance == capacity;
     }
 
     internal int? Check(TimeSpan now)
     {
         Refill(now);
-        return tokens > 0 ? null : (int)Math.Ceiling(TimeSpan.FromTicks(period - (now.Ticks - lastRefill!.Value)).TotalSeconds);
+        if (balance >= unitsPerToken) return null;
+        var deficit = unitsPerToken - balance;
+        var unitsPerSecond = unitsPerTick * TimeSpan.TicksPerSecond;
+        return (int)(1 + (deficit - 1) / unitsPerSecond);
     }
 
     internal void Consume(TimeSpan now)
     {
-        lastRefill ??= now.Ticks;
-        tokens--;
+        Refill(now);
+        balance -= unitsPerToken;
         LastUsed = now;
     }
 
     private void Refill(TimeSpan now)
     {
-        if (lastRefill is not long previous) return;
-        var elapsedPeriods = (now.Ticks - previous) / period;
-        if (elapsedPeriods == 0) return;
-        tokens = (int)Math.Min(settings.TokenLimit, tokens + elapsedPeriods * settings.TokensPerPeriod);
-        lastRefill = previous + elapsedPeriods * period;
+        var elapsed = now.Ticks - lastRefill;
+        if (elapsed <= 0) return;
+        lastRefill = now.Ticks;
+        if (balance == capacity) return;
+
+        // 先判斷是否回滿，避免程序長時間閒置後乘法溢位。
+        var missing = capacity - balance;
+        balance = elapsed > (missing - 1) / unitsPerTick
+            ? capacity
+            : balance + elapsed * unitsPerTick;
     }
 }
