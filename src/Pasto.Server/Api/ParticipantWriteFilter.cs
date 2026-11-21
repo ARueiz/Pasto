@@ -16,13 +16,17 @@ public sealed class ParticipantWriteLimiter(IOptions<ApiOptions> settings) : IDi
     public void Dispose() => limiter.Dispose();
 }
 
-public sealed class ParticipantWriteFilter(ParticipantWriteLimiter limiter, IOptions<ApiOptions> options) : IEndpointFilter
+public sealed class ParticipantWriteFilter(ParticipantWriteLimiter limiter, ParticipantReadLimiter readLimiter,
+    IOptions<ApiOptions> options) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var http = context.HttpContext;
         var roomId = Guid.Parse(Convert.ToString(http.GetRouteValue("roomId"), CultureInfo.InvariantCulture)!);
-        var identity = ParticipantAuthenticationHandler.Identity(http, roomId);
+        var identity = ParticipantAuthenticationHandler.Identity(http.User);
+        if (identity.RoomId != roomId)
+            return await readLimiter.AllowAsync(http, identity.ParticipantId)
+                ? ApiProblem.Create(http, 403, "ParticipantUnauthorized") : Results.Empty;
         var add = HttpMethods.IsPost(http.Request.Method);
         using var lease = limiter.Acquire(identity.ParticipantId, add);
         if (!lease.IsAcquired)

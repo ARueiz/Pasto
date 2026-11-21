@@ -20,6 +20,7 @@ async function mockApi(page: Page, hubAvailable = true, joinedIdentity = guest) 
   const state = {
     items: [makeItem('1', original, false)], joins: 0, reads: 0, me: 0, adds: 0, closed: false,
     meStatus: 200, throttle: false, version: 1n, subscriptions: 0, checks: 0, lateResponses: 0,
+    negotiateStatus: hubAvailable ? 200 : 403, negotiations: 0,
     beforeRead: undefined as (() => Promise<number | void>) | undefined,
     beforeNegotiate: undefined as (() => Promise<void>) | undefined,
     beforeAddResponse: undefined as ((version: bigint) => Promise<void>) | undefined,
@@ -31,8 +32,9 @@ async function mockApi(page: Page, hubAvailable = true, joinedIdentity = guest) 
   };
   await page.route('**/hubs/room/negotiate*', async route => {
     expect(route.request().headers().authorization).toBe(`Bearer ${room.credential}`);
+    state.negotiations++;
     await state.beforeNegotiate?.();
-    if (!hubAvailable) return route.fulfill({ status: 403, json: {} });
+    if (state.negotiateStatus !== 200) return route.fulfill({ status: state.negotiateStatus, json: {} });
     return route.fulfill({ json: {
       connectionId: 'test-connection', connectionToken: 'test-token', negotiateVersion: 1,
       availableTransports: [{ transport: 'WebSockets', transferFormats: ['Text'] }],
@@ -412,6 +414,53 @@ test('a foreground snapshot during initial negotiation keeps the connecting stat
   release();
   await expect(page.getByText('已同步', { exact: true })).toBeVisible();
 });
+
+test('negotiate 429 backs off even on manual refresh and REST reads and writes continue', async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => { Math.random = () => 0.99; });
+  const state = await mockApi(page, false);
+  state.negotiateStatus = 429;
+  await page.goto('/r/ABC123');
+  await expect(page.getByText('連線中斷')).toBeVisible();
+  await expect(page.locator('.message-text')).toHaveText(original);
+  expect(state.negotiations).toBe(1);
+
+  const readsBeforeRefresh = state.reads;
+  await page.getByRole('button', { name: '重新整理' }).click();
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(() => state.reads).toBeGreaterThan(readsBeforeRefresh);
+  expect(state.negotiations).toBe(1);
+  await page.clock.runFor(1_050);
+  await expect.poll(() => state.negotiations).toBe(2);
+  await page.getByRole('textbox', { name: '要送出的文字' }).fill('透過 REST 寫入');
+  await page.getByRole('button', { name: '送出' }).click();
+  await expect(page.getByText('透過 REST 寫入')).toBeVisible();
+  expect(state.negotiations).toBe(2);
+  await page.clock.runFor(2_200);
+  await expect.poll(() => state.negotiations).toBe(3);
+  await expect(page.getByText('連線中斷')).toBeVisible();
+});
+
+for (const reconnect of [false, true]) {
+  test(`negotiate 401 clears the identity and stops ${reconnect ? 'automatic reconnect' : 'initial retries'}`, async ({ page }) => {
+    await page.clock.install();
+    const state = await mockApi(page, reconnect);
+    state.negotiateStatus = reconnect ? 200 : 401;
+    await page.goto('/r/ABC123');
+    if (reconnect) {
+      await expect(page.getByText('已同步', { exact: true })).toBeVisible();
+      state.negotiateStatus = 401;
+      state.disconnect();
+      await page.clock.runFor(1_100);
+    }
+    await expect(page.getByText('這個分頁的身分已失效')).toBeVisible();
+    const negotiations = reconnect ? 2 : 1;
+    expect(state.negotiations).toBe(negotiations);
+    await page.clock.fastForward(60_000);
+    expect(state.negotiations).toBe(negotiations);
+    expect(state.joins).toBe(1);
+  });
+}
 
 test('a write succeeds while a snapshot request is in flight', async ({ page }) => {
   const state = await mockApi(page);

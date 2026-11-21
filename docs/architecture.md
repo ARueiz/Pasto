@@ -117,7 +117,9 @@ Version 對實際新增、實際刪除及關房加一；加入／身分恢復不
 | --- | --- |
 | 400 EmptyContent／TextTooLarge／InvalidRequest | 原文空白、超 8 KiB 或格式錯；保留使用者輸入並提示修正 |
 | 413 RequestBodyTooLarge | JSON Body 超 32 KiB；獨立於原文限制 |
-| 401 ParticipantUnauthorized | 缺少／無效／不屬該房 Credential；停操作與連線，不自動建新身分 |
+| 401 ParticipantUnauthorized | 缺少／無效 Credential；停操作與連線，不自動建新身分 |
+| 403 ParticipantUnauthorized | 已驗證的 REST 憑證屬於其他房間，扣 Participant 讀取配額後拒絕 |
+| 429 CredentialFailureRateLimited | 來源失敗桶無可用額度，帶 Retry-After，請求未查詢 DB |
 | 403 ItemDeleteForbidden／RoomDeleteForbidden | 身分有效但無操作權；不變更畫面成假成功 |
 | 404 RoomUnavailable | 不存在／過期／關房對外相同；清該 UUID 的本機狀態，不能靜默換房 |
 | 409 RoomItemLimitReached／ParticipantLimitReached | 300 筆或候選 Participant 預算已滿；不得把 TotalBytes 當容量錯誤 |
@@ -207,7 +209,7 @@ Worker 只有 now ≥ ReusableAfter 且無 Rooms 引用才刪保留碼；FK 防�
 
 已驗證 Participant／RoomId 的配額較寬鬆，IP 只粗保護，不作所有權。1,000 人同 NAT 的既有連線測試不能被小額 IP 連線上限阻擋；千人全新公開加入的速率則應另測並分批暖機，不偷偷繞過限流。典型 5 人不是房間硬上限。
 
-避免任意 Code／無效 Credential 建立 partition；僅固定全站鍵、可信 IP 或已驗證內部 ID，鍵數／TTL 有界，耗盡時新鍵套保守共用桶，不直接放行。只信任已配置 Reverse Proxy allowlist 的 forwarded headers，不讓 Client 自填 X-Forwarded-For。[ASP.NET Core rate limiting](https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit?view=aspnetcore-10.0)
+避免任意 Code／無效 Credential 建立 partition。鍵使用固定全站鍵、可信來源前綴或已驗證內部 ID，鍵數及 TTL 有界。一般配額滿載時新鍵使用保守共用桶，驗證前的憑證失敗來源表滿載時新來源退回 DB 保護底線。只信任已配置 Reverse Proxy allowlist 的 forwarded headers，不讓 Client 自填 X-Forwarded-For。[ASP.NET Core rate limiting](https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit?view=aspnetcore-10.0)
 
 HTTP limiter 不涵蓋每次 Hub invocation，SubscribeRoom 仍驗證／限頻；SignalR 長連線／long polling 由獨立連線預算保護，不能將常駐 transport 算入短 HTTP 工作的 96 額度而把所有 REST 堵住。偽造 Credential 不使用已驗證協商寬鬆額度。
 

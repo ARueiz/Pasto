@@ -11,11 +11,12 @@ public sealed class ApiOptions
     public BucketOptions JoinGlobal { get; set; } = new() { TokenLimit = 60, TokensPerPeriod = 30, PeriodSeconds = 1 };
     public BucketOptions ReadPerIp { get; set; } = new() { TokenLimit = 1000, TokensPerPeriod = 30000 };
     public BucketOptions ReadGlobal { get; set; } = new() { TokenLimit = 2000, TokensPerPeriod = 60000 };
+    public BucketOptions CredentialFailuresPerSource { get; set; } = new() { TokenLimit = 20, TokensPerPeriod = 1, PeriodSeconds = 1 };
     public BucketOptions ReadPerParticipant { get; set; } = new() { TokenLimit = 40, TokensPerPeriod = 240 };
     public BucketOptions AddPerParticipant { get; set; } = new() { TokenLimit = 10, TokensPerPeriod = 30 };
     public BucketOptions DeletePerParticipant { get; set; } = new() { TokenLimit = 10, TokensPerPeriod = 60 };
 
-    public bool IsValid() => new[] { CreatePerIp, CreateGlobal, JoinPerIp, JoinGlobal, ReadPerIp, ReadGlobal, ReadPerParticipant, AddPerParticipant, DeletePerParticipant }
+    public bool IsValid() => new[] { CreatePerIp, CreateGlobal, JoinPerIp, JoinGlobal, ReadPerIp, ReadGlobal, CredentialFailuresPerSource, ReadPerParticipant, AddPerParticipant, DeletePerParticipant }
         .All(bucket => bucket is not null && bucket.IsValid())
         && TrustedProxies is not null && TrustedProxies.All(x => IPAddress.TryParse(x, out _));
 }

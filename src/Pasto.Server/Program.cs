@@ -80,6 +80,7 @@ builder.Services.AddSingleton<IStorageFailureClassifier, StorageFailureClassifie
 builder.Services.AddScoped<IRoomJoinStore, RoomJoinStore>();
 builder.Services.AddScoped<JoinRoom>();
 builder.Services.AddScoped<IParticipantVerifier, ParticipantVerifier>();
+builder.Services.AddSingleton<ParticipantCredentialFailures>();
 builder.Services.AddScoped<IParticipantRecoveryStore, ParticipantRecoveryStore>();
 builder.Services.AddScoped<GetParticipant>();
 builder.Services.AddScoped<IRoomStateStore, RoomStateStore>();
@@ -118,6 +119,7 @@ app.UseForwardedHeaders();
 app.UseWebSockets();
 app.Use(RoomHub.CheckOriginAsync);
 app.UseRouting();
+app.UseMiddleware<ParticipantCredentialAdmission>();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

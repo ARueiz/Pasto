@@ -150,7 +150,7 @@ public sealed class ItemSnapshotApiTests(ITestOutputHelper output)
             Assert.Equal(ownerItem.CreatedAt, saved.GetProperty("createdAt").GetDateTime());
         }
         using var foreign = await ReadAsync(client, other.RoomId, room.Credential);
-        await AssertProblemAsync(foreign, 401, "ParticipantUnauthorized");
+        await AssertProblemAsync(foreign, 403, "ParticipantUnauthorized");
     }
 
     [Theory]
@@ -194,9 +194,9 @@ public sealed class ItemSnapshotApiTests(ITestOutputHelper output)
         };
         await using var factory = new PastoApiFactory(database.ConnectionString, settings);
         using var client = factory.CreateClient();
-        using var first = await ReadAsync(client, room.RoomId, authenticated ? room.Credential : null, suffix);
+        using var first = await ReadAsync(client, room.RoomId, authenticated ? room.Credential : new string('A', 22), suffix);
         Assert.Equal(authenticated ? HttpStatusCode.OK : HttpStatusCode.Unauthorized, first.StatusCode);
-        using var second = await ReadAsync(client, room.RoomId, authenticated ? room.Credential : null);
+        using var second = await ReadAsync(client, room.RoomId, authenticated ? room.Credential : new string('B', 22));
         await AssertProblemAsync(second, 429, "RateLimited");
         Assert.NotNull(second.Headers.RetryAfter?.Delta);
     }

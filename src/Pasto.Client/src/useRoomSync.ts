@@ -1,4 +1,5 @@
-import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
+import { DefaultHttpClient, HttpError, HubConnectionBuilder, HubConnectionState, LogLevel, NullLogger } from '@microsoft/signalr';
+import type { HttpRequest } from '@microsoft/signalr';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, invalidRoom } from './api';
 import type { RoomSession, Snapshot } from './api';
@@ -9,6 +10,23 @@ type RoomChanged = { roomId: string; version: string };
 const coalesceMs = 150;
 const pollDelay = () => 15_000 + Math.random() * 5_000;
 const reconnectDelay = (attempt: number) => Math.min(20_000, 1_000 * 2 ** attempt) * (0.5 + Math.random() / 2);
+
+class RoomHubHttpClient extends DefaultHttpClient {
+  constructor(private readonly onUnauthorized: () => void) {
+    super(NullLogger.instance);
+  }
+
+  override async send(request: HttpRequest) {
+    try {
+      return await super.send(request);
+    } catch (error) {
+      // SignalR wraps negotiate errors before exposing them to the connection callbacks.
+      if (error instanceof HttpError && error.statusCode === 401 && request.url &&
+        new URL(request.url).pathname === '/hubs/room/negotiate') this.onUnauthorized();
+      throw error;
+    }
+  }
+}
 
 export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' | 'room') => void) {
   const [snapshot, setSnapshot] = useState<Snapshot>();
@@ -21,7 +39,11 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
     const lifetime = new AbortController();
     const { signal } = lifetime;
     const connection = new HubConnectionBuilder()
-      .withUrl('/hubs/room', { accessTokenFactory: () => session.credential, withCredentials: false })
+      .withUrl('/hubs/room', {
+        accessTokenFactory: () => session.credential,
+        withCredentials: false,
+        httpClient: new RoomHubHttpClient(() => invalidate('identity')),
+      })
       .withAutomaticReconnect({ nextRetryDelayInMilliseconds: ({ previousRetryCount }) =>
         previousRetryCount < 5 ? reconnectDelay(previousRetryCount) : null })
       .configureLogging(LogLevel.None)
@@ -115,8 +137,7 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
         if (signal.aborted || operation.signal.aborted) return;
         const invalid = invalidRoom(error);
         if (invalid) {
-          stop();
-          onInvalid(invalid);
+          invalidate(invalid);
           return;
         }
         setError(error);
@@ -154,6 +175,12 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
       if (!signal.aborted) setStatus('disconnected');
     }
 
+    function invalidate(kind: 'identity' | 'room') {
+      if (signal.aborted) return;
+      stop();
+      onInvalid(kind);
+    }
+
     async function recoverSubscription() {
       if (signal.aborted) return;
       disconnected();
@@ -164,7 +191,8 @@ export function useRoomSync(session: RoomSession, onInvalid: (kind: 'identity' |
     }
 
     async function start() {
-      if (signal.aborted || starting || !navigator.onLine || connection.state !== HubConnectionState.Disconnected) return;
+      if (signal.aborted || starting || startTimer !== undefined || !navigator.onLine ||
+        connection.state !== HubConnectionState.Disconnected) return;
       starting = true;
       try {
         await connection.start();

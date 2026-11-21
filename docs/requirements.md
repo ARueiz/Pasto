@@ -99,7 +99,7 @@ MVP 不含檔案／圖片上傳、AI Agent、文字編輯、歷史復原、期�
 | HTTP 並行 | 全站 96 個 in-flight；建房／加入子上限 16、新增文字 32、讀取／刪除等 48；超限不排隊 | 類別上限總和 96，避免公開入口搶光；SignalR 常駐 transport 另計，不把千條 WebSocket 算進 HTTP 工作額度 |
 | DB pool | API pool Max 64、Worker 獨立受限 pool Max 4，最小皆 0；兩者合計最多 68，另留維運連線 | 不是每個 DbContext 都開新 pool；部署 PG max_connections 須涵蓋合計與餘裕，需測等待／鎖逾時 |
 | 部署與記憶體 | 起始 app／DB 各 4 vCPU、8 GiB；DB volume 建議至少 20 GiB；磁碟 70% 警戒、85% 暫停新建／加入／新增，保留清理空間 | 部署／檔案系統能力須確認；CPU／記憶體持續高水位也降低 admission。不是精確全站資料配額，刪除亦可能耗 WAL，不能等到滿碟才動作 |
-| 有界 limiter 狀態 | 全站最多 20,000 個活躍 partition／失敗計數鍵，閒置 10 分鐘回收 | 僅可信 IP、已驗證內部 ID 及固定全站鍵；滿額時新鍵套保守共用桶，不繞過或無限配置。不可用任意輸入 Code 作 partition |
+| 有界 limiter 狀態 | 全站最多 20,000 個活躍 partition／失敗計數鍵，閒置 10 分鐘回收 | 僅可信 IP、已驗證內部 ID 及固定全站鍵；一般配額滿載時新鍵使用保守共用桶。驗證前的憑證失敗計數滿載時，新來源退回 DB 保護底線。驗證前無法分辨有效與無效憑證，共用失敗桶耗盡會封鎖所有新來源。不可用任意輸入 Code 作 partition |
 
 部署警戒與 admission 必須有恢復條件及遲滯，避免臨界值反覆切換；精確門檻由負載測試確認。使用可信 Reverse Proxy allowlist 處理 forwarded headers，防自填 X-Forwarded-For。HTTP limiter 不限制每次 WebSocket invocation，Hub 方法另驗證與計數。
 

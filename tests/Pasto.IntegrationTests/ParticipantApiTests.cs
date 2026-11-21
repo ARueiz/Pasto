@@ -124,7 +124,7 @@ public sealed class ParticipantApiTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ValidForeignCredential_Is401WithoutInvokingRoomRecovery(bool targetExists)
+    public async Task ValidForeignCredential_Is403WithoutInvokingRoomRecovery(bool targetExists)
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         var owner = await CreateRoomAsync(database);
@@ -136,7 +136,7 @@ public sealed class ParticipantApiTests
         });
         using var client = factory.CreateClient();
         using var response = await GetMeAsync(client, target, owner.Credential);
-        await AssertProblemAsync(response, 401, "ParticipantUnauthorized");
+        await AssertProblemAsync(response, 403, "ParticipantUnauthorized");
     }
 
     [Theory]
@@ -150,7 +150,8 @@ public sealed class ParticipantApiTests
         await using var factory = new PastoApiFactory(database.ConnectionString);
         using var client = factory.CreateClient();
         using var scope = factory.Services.CreateScope();
-        var identity = await scope.ServiceProvider.GetRequiredService<IParticipantVerifier>().VerifyAsync(room.Credential, default);
+        var identity = await scope.ServiceProvider.GetRequiredService<IParticipantVerifier>()
+            .VerifyAsync(ParticipantCredential.HashValue(room.Credential), default);
         Assert.Equal(room.RoomId, identity!.RoomId); // 驗證器不把房間有效性混入身分判斷。
         using var response = await GetMeAsync(client, room.RoomId, room.Credential);
         await AssertProblemAsync(response, 404, "RoomUnavailable");
@@ -294,7 +295,7 @@ public sealed class ParticipantApiTests
                 context.Connection.RemoteIpAddress = IPAddress.Parse(ip);
                 context.Request.Method = "GET";
                 context.Request.Path = $"/api/rooms/{Guid.NewGuid()}/me";
-                context.Request.Headers.Authorization = $"Bearer {new string('A', 22)}";
+                context.Request.Headers.Authorization = $"Bearer {new string(ip[^1], 22)}";
             });
             Assert.Equal("no-store", response.Response.Headers.CacheControl);
             return response.Response.StatusCode;
@@ -444,7 +445,7 @@ public sealed class ParticipantApiTests
     private sealed class CountingVerifier : IParticipantVerifier
     {
         public int Calls { get; private set; }
-        public Task<ParticipantIdentity?> VerifyAsync(string credential, CancellationToken cancellationToken)
+        public Task<ParticipantIdentity?> VerifyAsync(byte[] credentialHash, CancellationToken cancellationToken)
         {
             Calls++;
             return Task.FromResult<ParticipantIdentity?>(null);
@@ -452,7 +453,7 @@ public sealed class ParticipantApiTests
     }
     private sealed class FailedVerifier : IParticipantVerifier
     {
-        public Task<ParticipantIdentity?> VerifyAsync(string credential, CancellationToken cancellationToken)
+        public Task<ParticipantIdentity?> VerifyAsync(byte[] credentialHash, CancellationToken cancellationToken)
             => throw new NpgsqlException("Simulated identity storage outage.");
     }
 }

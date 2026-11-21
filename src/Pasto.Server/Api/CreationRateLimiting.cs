@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Sockets;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -28,23 +29,40 @@ internal static class CreationRateLimiting
         {
             RoomCreationEndpoint.Name => ("create", settings.CreatePerIp, settings.CreateGlobal),
             ParticipantEndpoints.JoinName => ("join", settings.JoinPerIp, settings.JoinGlobal),
-            // DELETE 同樣須先保護憑證查詢，但不耗 Participant 的讀取配額。
-            ParticipantEndpoints.MeName or RoomEndpoints.StateName or RoomEndpoints.CloseName
-                or ItemEndpoints.AddName or ItemEndpoints.DeleteName or ItemEndpoints.SnapshotName
-                => ("read", settings.ReadPerIp, settings.ReadGlobal),
+            // 受保護 REST 與 Hub 共用 DB 保護底線。只計入可能執行憑證查詢的請求。
+            _ when ParticipantCredentialAdmission.Prepared(context) is not null
+                => ("database", settings.ReadPerIp, settings.ReadGlobal),
             _ => null
         };
 
-    internal static Task RejectAsync(HttpContext context, RateLimitLease lease, int fallbackSeconds)
+    internal static Task RejectAsync(HttpContext context, RateLimitLease lease, int fallbackSeconds, string code = "RateLimited")
     {
         var seconds = lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
             ? Math.Max(1, Math.Ceiling(retryAfter.TotalSeconds)) : fallbackSeconds;
-        context.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-        return ApiProblem.WriteAsync(context, 429, "RateLimited");
+        return RejectAsync(context, (int)seconds, code);
     }
 
-    private static string IpKey(HttpContext context)
-        => context.Connection.RemoteIpAddress?.MapToIPv6().ToString() ?? "unknown";
+    internal static Task RejectAsync(HttpContext context, int retryAfterSeconds, string code)
+    {
+        context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+        return ApiProblem.WriteAsync(context, 429, code);
+    }
+
+    internal static string IpKey(HttpContext context)
+    {
+        var address = context.Connection.RemoteIpAddress;
+        if (address is null)
+            return "unknown";
+        if (address.IsIPv4MappedToIPv6)
+            return address.MapToIPv4().ToString();
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            Span<byte> bytes = stackalloc byte[16];
+            address.TryWriteBytes(bytes, out _);
+            return Convert.ToHexString(bytes[..8]);
+        }
+        return address.ToString();
+    }
 
     internal static TokenBucketRateLimiterOptions Bucket(BucketOptions settings) => new()
     {
