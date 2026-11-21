@@ -78,7 +78,7 @@ S2-01 經 Claude 靜態審查，P0～P2 為 0、P3 為 1，未獨立重跑測試
 
 | Api 設定前綴 | TokenLimit／TokensPerPeriod／PeriodSeconds |
 | --- | --- |
-| JoinPerIp | 20／120／60 |
+| JoinPerIp | S2 交付為 20／120／60，S7-2 調為 30／120／60，見[需求第 5 節](requirements.md#5-初始安全與資源設定待安全測試與壓測調整) |
 | JoinGlobal | 60／30／1 |
 | ReadPerIp | 1000／30000／60 |
 | ReadGlobal | 2000／60000／60（新增的保守全站候選值，未經壓測） |
