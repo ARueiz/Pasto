@@ -14,7 +14,8 @@ using Pasto.Server.Infrastructure.Security;
 using Pasto.Server.Observability;
 using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
+var migrate = args is ["--migrate"];
+var builder = WebApplication.CreateBuilder(migrate ? [] : args);
 builder.Logging.ClearProviders();
 builder.Services.AddSerilog((_, logger) => ServerLogging.Configure(builder.Configuration, builder.Environment, logger),
     preserveStaticLogger: true, writeToProviders: true);
@@ -22,6 +23,7 @@ builder.AddPastoTelemetry();
 // 在 JSON 綁定／字串配置前由 Kestrel 限制實際 body bytes，包含未知長度的串流。
 builder.WebHost.ConfigureKestrel(options =>
 {
+    options.AddServerHeader = false;
     options.Limits.MaxRequestBodySize = 32 * 1024;
     options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(10);
     options.Limits.MinResponseDataRate = new MinDataRate(8 * 1024, TimeSpan.FromSeconds(15));
@@ -29,7 +31,10 @@ builder.WebHost.ConfigureKestrel(options =>
 
 // 連線由環境變數 ConnectionStrings__Pasto 或 .NET configuration 提供；不在 repo 保存密碼。
 // Compose 的 .env 只供 Compose 使用，不會自動匯入 ASP.NET Core 的設定。
-var connectionString = builder.Configuration.GetConnectionString("Pasto");
+var deployed = builder.Configuration.GetValue<bool>("Deployment:Enabled");
+var connectionString = deployed || migrate
+    ? DeploymentDatabase.GetConnectionString(builder.Configuration, migrate)
+    : builder.Configuration.GetConnectionString("Pasto");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     throw new InvalidOperationException("Set ConnectionStrings__Pasto before starting Pasto.Server.");
@@ -41,7 +46,7 @@ builder.Services.AddOptions<DatabaseOptions>().BindConfiguration("Database")
 builder.Services.AddSingleton<NpgsqlDataSource>(services =>
 {
     var settings = services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
-    return CreateDataSource(connectionString, settings.MaxPoolSize);
+    return CreateDataSource(connectionString, settings.MaxPoolSize, pooling: !migrate);
 });
 builder.Services.AddDbContextFactory<PastoDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<NpgsqlDataSource>()));
@@ -138,11 +143,28 @@ builder.Services.AddScoped<IRoomClosureStore, RoomClosureStore>();
 builder.Services.AddScoped<CloseRoom>();
 
 var app = builder.Build();
+if (deployed || migrate)
+{
+    var factory = app.Services.GetRequiredService<IDbContextFactory<PastoDbContext>>();
+    var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(DeploymentDatabase));
+    var prepared = await DeploymentDatabase.PrepareAsync(factory, logger, migrate, app.Lifetime.ApplicationStopping);
+    if (!prepared || migrate)
+    {
+        await app.DisposeAsync();
+        return prepared ? 0 : 1;
+    }
+}
+
 app.UseMiddleware<ApiFailureMiddleware>();
-app.UseStatusCodePages(status => ApiProblem.WriteAsync(status.HttpContext,
-    status.HttpContext.Response.StatusCode,
-    status.HttpContext.Response.StatusCode == 413 ? "RequestBodyTooLarge" : "InvalidRequest"));
+app.UseStatusCodePages(status =>
+{
+    var response = status.HttpContext.Response;
+    response.Headers.CacheControl = "no-store";
+    return ApiProblem.WriteAsync(status.HttpContext, response.StatusCode,
+        response.StatusCode == 413 ? "RequestBodyTooLarge" : "InvalidRequest");
+});
 app.UseForwardedHeaders();
+app.UsePastoFrontend(deployed);
 app.UseWebSockets();
 app.UseRouting();
 app.Use(RoomHub.CheckRequestAsync);
@@ -160,15 +182,16 @@ app.MapItems();
 app.MapPastoHealth();
 app.MapHub<RoomHub>(RoomHub.Path, options => options.Transports = HttpTransportType.WebSockets).RequireAuthorization();
 // 啟動時不自動 Migrate，避免單純啟動服務就修改資料庫。
-app.Run();
+await app.RunAsync();
+return 0;
 
-static NpgsqlDataSource CreateDataSource(string connectionString, int maxPoolSize)
+static NpgsqlDataSource CreateDataSource(string connectionString, int maxPoolSize, bool pooling = true)
 {
     var connection = new NpgsqlConnectionStringBuilder(connectionString)
     {
         MaxPoolSize = maxPoolSize,
         MinPoolSize = 0,
-        Pooling = true,
+        Pooling = pooling,
         IncludeErrorDetail = false,
         LogParameters = false
     };

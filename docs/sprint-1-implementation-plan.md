@@ -171,13 +171,15 @@ S7 完成後交付。代理與瀏覽器驗收可先使用隔離容器環境。�
 | --- | --- |
 | 同源靜態檔 | ASP.NET Core 提供 Vite 建置檔，開發維持 Vite。`ApiFailureMiddleware` 的 `no-store` 限定 API、Hub 等敏感回應。`index.html` 使用 `no-cache`，帶內容 hash 的資產長期快取。驗證刷新 `/r/{code}`、SPA fallback 排除 `/api`、`/hubs`、`/health` 及遺失靜態檔；測試 CSP、`Referrer-Policy: no-referrer`、HSTS、`X-Content-Type-Options: nosniff` 及 WSS。 |
 | Caddy／TLS | 內網用 Internal CA 或自備憑證，AWS 用公開信任憑證，localhost 開發可用 HTTP。初始化設定主機名稱／IP 與 SAN，持久化 CA 及 Caddy 資料。提供電腦、iOS、Android 的根憑證信任步驟，實機驗證裝置確實信任憑證且 Clipboard API 可用。所有說明文件與初始化流程不得要求使用者忽略憑證錯誤或略過警告。Caddy 與應用程式解耦。驗收 access log 及錯誤路徑已遮蔽 URL 房碼、`access_token` 等敏感資料。 |
-| 可信代理 | 在既有可信 IP 外支援明確 CIDR allowlist，固定 Compose 代理子網範圍，API host port 維持不發布。只信任 Compose 固定的代理子網段或使用者明確設定的 CIDR。不得自動信任所有私有網段，例如 `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`。驗收私有網段內其他來源偽造的 `X-Forwarded-*` 不會被採用，並核對 HTTPS scheme、SignalR Origin、限流所用的真實 Client IP，以及代理外部無法存取 `/health/*`。 |
-| Migration 與啟動 | 獨立一次性 Job，DB 未就緒時有限等待；Job 失敗不得啟動不相容 API。API 啟動時以 DML 帳號唯讀檢查 schema／遷移歷史，確認不相容記 Critical 並以非零碼退出；短暫無法連線先有限重試。開工時定義高於應用版本的 schema 處置。確認已遷移、未遷移、暫時不可達、測試隔離 schema，以及 EF Core 10／現行 Npgsql 的並行 migration lock 行為。DDL 帳號與 API 帳號最小權限分離，readiness 只做低成本 DB 探針。 |
+| 可信代理 | `edge` 使用可設定的固定子網，只放 Caddy 和 App。App 僅在 `edge` 監聽並且只信任 Caddy 的固定 IP。`db` 是內部網路，放 App、Migration Job 與 PostgreSQL。只對外發布 Caddy。驗收兩層網路隔離、非 Caddy 來源的 `X-Forwarded-*` 被忽略、HTTPS Origin 經 Caddy 建立 WSS，以及外部無法存取 `/health/*`。 |
+| Migration 與啟動 | 同一映像以不同入口啟動一次性 Migration Job 與 App。Job 遷移後按表授權，成功後才啟動 App。App 以 DML 帳號唯讀檢查 migration 歷史，遇到缺少或未知 migration 時記 Critical 並非零退出。DB 暫時無法連線時有限重試。App、Caddy、PostgreSQL 使用 `unless-stopped`，Job 使用 `restart: "no"`。驗收 daemon 重啟、並行遷移、空白和較新 schema，以及產品表 DML、history 唯讀、schema `USAGE`、無 `CREATE`／`TRUNCATE` 與非 table owner。 |
 | Compose | 正式設定放 `deploy/`，根目錄測試用 `compose.yaml` 保留。初始化用 `.env.example` 說明密碼、主機、TLS、持久化設定，未提供必要設定須拒絕啟動。初始化後支援 `docker compose up -d`。服務使用 stdout／stderr 與有界輪替，例如 `local` driver 的 `max-size: 10m`、`max-file: 5`，驗證目標 Docker／NAS 相容性並提供替代 driver。日誌與 DB 資料各有保存期限。 |
 
 CSP 初稿為 `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`。Vite 將 logo SVG 內嵌供 `mask-image` 使用，需保留 `img-src` 的 `data:`。依部署來源及瀏覽器驗證 `connect-src` 是否須明確列出同源 WSS。
 
 ## 13. S8：負載證據、驗收與文件收尾
+
+涉及來源 IP、同 NAT 和每來源限流的情境，須使用已通過真實來源 IP 驗收的 Linux Docker Engine。Docker Desktop 供試用，該環境的來源 IP 可能被轉送為閘道 IP。 [Linux 主機驗收](../deploy/README.md#驗收)
 
 交付可重跑負載情境／版本與硬體設定、結果報告、查詢計畫／主要瓶頸、最終候選設定調整與已知限制；補齊操作／本機啟動及測試說明。使用既定單實例，不因測試數字就新增 Redis 等基礎設施。
 

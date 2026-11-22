@@ -1,5 +1,17 @@
 # Pasto — PostgreSQL 整合測試與 Migration
 
+## Deployment（2026-11-22）
+
+- Release 建置、受影響 C# 檔案的 whitespace 驗證、前端 Lint 與建置通過。完整 PostgreSQL 18.6 回歸為 386 通過、0 失敗、0 略過，TRX 為 `TestResults/deployment-regression-final.trx`。未準備本機資料庫時，首次相關測試有 10 例因未設定 `PASTO_TEST_CONNECTION_STRING` 失敗。首輪完整回歸另外抓到 `/missing` 的 ProblemDetails 缺少 `no-store`，已修正並重跑。
+- 在隔離的 PostgreSQL 18.6 執行 `deploy/init-db.sql`、兩個同版本 Migration Job 和 `deploy/check-db-privileges.sql`。兩個 Job 均成功，遷移歷史只有一筆。先前 catalog 測試抓到 migrator 無法轉授 schema `USAGE`，現由初始化帳號直接授予。驗證空白及較新 schema 均記 Critical 並以 1 退出。
+- Caddy 2.11.9 設定驗證通過。本機使用 Caddy、Vite 產物與實際 PostgreSQL 確認 TLS、帶 HTTPS Origin 的 WSS、健康端點封鎖、快取與安全標頭及執行角色 DML。延遲資料庫連線首次遇到 EF 包裝暫時性錯誤，改為直接開啟 Npgsql 連線後，實測 App 有限重試並成功啟動。檢查 Caddy 正常與 502 日誌、App 日誌，以及由本機接收器擷取的 OTLP trace，皆未出現測試房碼、token 或正文。
+- Compose CLI 設定驗證通過，含必要環境變數缺漏、自架網路設定、固定代理 IP、重啟策略與共用映像。
+- 使用者在 Docker Desktop 驗收映像建置、啟動順序、DB 權限、網路隔離、轉送標頭信任、路由與快取、安全標頭、WSS、日誌遮蔽、schema 不相容、DB 晚就緒、Docker 重啟恢復，以及空資料庫的並行遷移。手機實機驗收 HTTPS、憑證信任、即時同步與複製後貼到其他 App。IP 網址的 TLS 已用 `default_sni` 暫時設定驗證。
+- 修正後以不同的監聽 IP 與憑證 IP 實測。移除 `default_sni` 時無 SNI 連線重現 TLS internal alert，使用正式設定時成功且憑證受信任。新增 `RuntimeProductGrants_MatchAllTablesInTheRelationalModel`，以純 EF 模型檢查執行角色的授權清單。修正後重跑 Migration Job 與 catalog 測試，並確認直接連 Kestrel 的回應沒有 `Server` 標頭。完整 PostgreSQL 回歸為 387 通過、0 失敗、0 略過，TRX 為 `TestResults/deployment-review-full.trx`。
+- Docker Desktop 實測將來源顯示為 `172.30.42.1`，S8 的來源 IP 相關情境須在 Linux Docker Engine 上執行。 [自架驗收步驟](../deploy/README.md#驗收)
+- 以橋接網路的 Ubuntu 24.04.5 LTS 虛擬機執行原生 Docker Engine，建置 `075af14` 的映像，Migration Job 以 0 退出。初測確認 Caddy 記錄了不同來源 IP。初測兩個來源的請求相隔 38.77 秒，超過建房每來源額度約 2 秒補一格的時間，因此限流隔離以重測結果為準。
+- 重測的來源 A 是 Windows 有線網路端。來源 B 使用 Ubuntu 虛擬機內的獨立網路命名空間模擬第二個用戶端。測試預先建立該命名空間並保持 SSH 連線。A 前 10 次建房均回 201，最後三筆依序為 A 回 429、B 回 201、A 再回 429。兩次 429 相隔 53.69 毫秒，Caddy 日誌量得 53.77 毫秒，並核對兩個 `client_ip` 與狀態碼。從第一筆建房到最後一筆 429 的用戶端量測是 162.00 毫秒，也小於 2 秒。逐筆時間戳位於 `TestResults/deployment-linux-lab/source-ip-retest-p2-1/`。S8 的負載及效能尚未量測。
+
 ## S7 整合審查 P3 修正（2026-11-21）
 
 - 修正前執行 `dotnet test Pasto.slnx -c Release --no-restore --filter "FullyQualifiedName~ExportedHttpMetricsDistinguishOverloadReasonsFromStorageFailure" --logger "trx;LogFileName=s7-metrics-p3-repro.trx"`，1 例預期失敗。HTTP 503 雖分別由硬上限、過載高水位與儲存失敗觸發，匯出時三者聚合成同一點。

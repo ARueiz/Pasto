@@ -1,0 +1,40 @@
+{
+	admin off
+	default_sni {$PASTO_SITE_HOST}
+	servers {
+		protocols h1 h2
+	}
+	log {
+		output stdout
+		format filter {
+			request>uri delete
+			request>headers delete
+			resp_headers delete
+			wrap json
+		}
+	}
+}
+
+{$PASTO_SITE_HOST} {
+	tls {$PASTO_TLS:internal}
+	log {
+		output stdout
+		format filter {
+			request>uri delete
+			request>headers delete
+			resp_headers delete
+			wrap json
+		}
+	}
+
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss://{$PASTO_SITE_HOST}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		Referrer-Policy no-referrer
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
+
+	@health path /health /health/*
+	respond @health 404
+	reverse_proxy app:8080
+}

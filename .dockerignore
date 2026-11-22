@@ -1,0 +1,9 @@
+.git
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/TestResults
+**/.env*
+deploy/certs
+pasto-design
