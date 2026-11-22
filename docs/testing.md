@@ -152,6 +152,12 @@
 - 用真 PostgreSQL 與 DI 注入兩筆來源上限。表滿時，不在表中的來源可以查無並回 401，重送同憑證命中快取。新來源第 7 筆需查詢的請求被每來源底線拒絕，全站第 17 筆需查詢的請求被全站底線拒絕，兩次拒絕均未查 DB。有效憑證的 me、快照、新增、刪除、關房及 Hub negotiate 皆成功。既有來源的失敗桶耗盡後仍在 DB 查詢前回 429。手動時鐘驗證 `6102` 在 59 秒時仍節流，滿 60 秒的下一次未計費事件才送出下一筆摘要。
 - 本輪修改後端與文件。Edge 沿用第一批 32 例通過的結果，本輪未重跑。
 
+## S7 啟動基線（2026-11-21）
+
+2026-11-23 自 TODO.md 移入，內容未改寫。
+
+- Release 建置與格式檢查通過。SignalR、日誌與遙測 22 例，受保護 REST 122 例，均通過且無失敗或略過。TRX 為 `s7-kickoff-baseline.trx` 與 `s7-rest-baseline.trx`。
+
 ## Logging、Health Checks 與 OpenTelemetry（2026-11-21）
 
 - Release Build 0 警告、0 錯誤，`dotnet format Pasto.slnx --verify-no-changes --no-restore` 與 `git diff --check` 通過。Health 測試初始化器首次格式檢查未通過，修正換行後重跑通過。
@@ -244,6 +250,14 @@
 - 前端 `npm run lint`、`npm run build` 通過，後者包含 TypeScript 檢查。Edge 14 例通過，涵蓋先訂閱再讀、重複與亂序通知合併、慢快照期間維持單一請求、舊 401／404 不清除重新加入的房間，以及重連與前景補查。
 - 兩個獨立的 Edge 工作階段經 Vite、Kestrel WebSocket 與隔離 PostgreSQL schema 實測新增、刪除、重新訂閱和關房。測試工具刻意丟棄訪客端最後一次 `RoomChanged`，正常前景頁面兩次分別在 17.15 秒與 18.68 秒補回資料。壓測與正式反向代理驗證留在 S7／S8。
 - 初次 API 測試出現 `No password has been provided`，修正測試程序的連線設定後通過。初次雙瀏覽器實測只關閉代理的上游 socket，等待訪客顯示斷線狀態逾時，改由測試工具關閉瀏覽器端 socket 後通過。
+
+## S4 前端驗證（2026-11-18～19）
+
+2026-11-23 自 TODO.md 移入，內容未改寫。S4 的交付驗證另見 [S4 前端 API](s4-api.md)。
+
+- S4 P2：修正前逐字輸入 `Pasto clipboard` 時只留下 `P`，已由新增測試重現。修正後 TypeScript、Lint、Build 通過，完整 Edge 10 例通過。
+- S4 實測調整的 TypeScript、Lint、Build 與 Edge 瀏覽器測試 9 例通過。Edge 使用模擬 API，已擷取 360px 淺色、1280px 深色畫面。先前後端回歸 278 例通過，本輪只有前端與文件變更。開發工具稽核限制見 [S4 前端 API](s4-api.md)。
+- 審查方（Claude）2026-11-19 在 `7d8960e` 獨立重跑：TypeScript、Lint、Build 通過，Edge 9 例全數通過。部署環境實測（2026-11-18，區網 Vite＋正式後端）：API 授權邊界 21 項符合預期，包括跨房 token、訪客刪除或關房、關房後 404。區網 HTTP 不是 secure context，Clipboard API 不可用，因此裝置測試改用 Dev Tunnels HTTPS（private，限 owner）。MacBook 實機驗證已由使用者確認通過；iPhone 掃 QR 尚未測試。
 
 ## S3-02 文字快照驗證（2026-11-18）
 

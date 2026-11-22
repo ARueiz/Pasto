@@ -224,6 +224,8 @@ Trade-offs，並等待確認：
 
 每個主要階段（S1、S2、S3 等）合併至 `main` 後，更新 `README.md` 的目前狀態與進度表，記錄合併的 PR、已交付功能及下一個階段，並與 `TODO.md` 保持一致。
 
+測試數量、測試命令、TRX 與 commit hash 只記錄在 `docs/testing.md`。`README.md` 與 `TODO.md` 只寫「哪個 PR 交付了什麼」與目前狀態，需要引用驗證結果時連結到 `docs/testing.md`，不重複抄寫數字，避免多份文件不同步。
+
 完成任務後，請簡潔回報：
 
 ### Summary
