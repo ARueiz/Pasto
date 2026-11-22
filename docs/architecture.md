@@ -1,12 +1,12 @@
 # Pasto Sprint 1 — 最終架構與實作前修訂
 
-更新：2026-10-20；2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP（正式持久層優先、整份快照、基本限流）。Q1～Q7、T1～T8 方向已確認；限流／效能設定須實測，產品功能尚未實作（持久層進度見文末）。
+2026-11-05 依 [ADR 0003](decisions/0003-mvp-scope-reduction.md) 收斂 MVP（正式持久層優先、整份快照、基本限流）。目前交付進度見 [TODO.md](../TODO.md)，限流與效能的實測規劃見 [S8](sprint-1-implementation-plan.md#13-s8負載證據驗收與文件收尾)。
 
 規則以 [requirements.md](requirements.md) 為準；現行決策見 [ADR 0002](decisions/0002-room-code-and-anonymous-participants.md) 與 [ADR 0003](decisions/0003-mvp-scope-reduction.md)，[ADR 0001](decisions/0001-initial-architecture.md) 只保留歷史。執行順序見 [Sprint 1 實作計畫](sprint-1-implementation-plan.md)。
 
 ## 1. 系統邊界與分層
 
-一個 Rooms 模組、一個 ASP.NET Core Application、一個 PostgreSQL。React SPA 正式環境優先同源；Docker Compose 用於本機／整合環境，不自動提供 HA。PostgreSQL 是 Source of Truth；REST 讀寫，DB commit 後才透過 SignalR 通知。
+一個 Rooms 模組、一個 ASP.NET Core Application、一個 PostgreSQL。正式環境由 ASP.NET Core 同源提供 React SPA、REST 與 SignalR。Docker Compose 提供本機驗證與單實例自架。PostgreSQL 是 Source of Truth，REST 負責讀寫，DB commit 後才透過 SignalR 通知。
 
 ```mermaid
 flowchart LR
@@ -232,10 +232,12 @@ REST endpoint filter 在參數綁定與憑證驗證後取得處理名額，產�
 | 資源 | 現有機制與訊號 | 503 |
 | --- | --- | --- |
 | HTTP 處理中 | 真實全站、分類與來源計數，及全站高／低水位遲滯 | 超限或暫停建房／加入時回 `Overloaded` |
-| DB pool | 既有 pool 上限與 DB 錯誤處理，等待量未接至 admission | 實際儲存失敗回 `ServiceUnavailable`，pool 等待水位留 Deployment |
-| 程序／容器記憶體 | 尚未接水位訊號，慢速快照記憶體留 S8 量測 | 記憶體觸發規則留 Deployment |
-| CPU | 尚未接水位訊號 | CPU 觸發規則留 Deployment |
-| 磁碟 | 尚未接水位訊號 | 磁碟觸發規則留 Deployment |
+| DB pool | 既有 pool 上限與 DB 錯誤處理。S8 量測 pool 等待 | 實際儲存失敗回 `ServiceUnavailable`，pool 等待量尚未接至 admission |
+| 程序／容器記憶體 | S8 量測慢速快照的記憶體峰值 | 尚未實作記憶體水位觸發規則 |
+| CPU | S8 量測負載下的 CPU 使用率 | 尚未實作 CPU 水位觸發規則 |
+| 磁碟 | S8 量測磁碟壓力及其影響 | 尚未實作磁碟水位觸發規則 |
+
+依 S8 的量測結果評估是否另立工作，實作上述資源的 admission 觸發規則。
 
 過載判定以請求取得、釋放名額的事件為準，使用單調時鐘。進入條件為計數至少 80 持續 2 秒，恢復條件為低於 64 持續 10 秒。期間只要有一次事件觀察到計數離開對應範圍，該次計時就重來。沒有請求進出事件時，下一次事件才評估是否已達持續時間。
 
@@ -267,11 +269,13 @@ REST endpoint filter 在參數綁定與憑證驗證後取得處理名額，產�
 
 ## 11. 驗證與演進條件
 
-### 部署與可觀測性方向
+### 部署與可觀測性
 
 自架 Compose 為主要部署形式。ASP.NET Core 提供 Vite 產物，與 API／SignalR 同源。Caddy 負責 TLS，內網用 Internal CA 或自備憑證。一次性 Migration Job 執行 DDL，API 帳號啟動時唯讀確認 schema，不相容即停止。部署與健康檢查的網路界線見 [ADR 0004](decisions/0004-observability-and-deployment.md)。
 
-應用程式使用 `ILogger<T>` 與 Serilog 輸出 Console，Docker 負責輪替。OpenTelemetry 收集指標與 trace，依設定啟用 OTLP。ASP.NET Core 分開回報存活與 DB 就緒，另提供 Worker 狀態。Seq 與 AWS 收集為選配。以上待各階段交付。目前中介軟體仍對一般回應設定 `no-store`，代理僅接受列舉 IP，啟動未檢查 schema，根目錄 Compose 僅供本機 PostgreSQL 驗證。 [分階段驗收](sprint-1-implementation-plan.md)
+應用程式使用 `ILogger<T>` 與 Serilog 輸出 Console，Docker 負責輪替。OpenTelemetry 收集指標與 trace，依設定啟用 OTLP。ASP.NET Core 分開回報存活與 DB 就緒，另提供 Worker 狀態。Seq 與 AWS 收集為後續選配。
+
+正式 Compose 位於 `deploy/`，只有 Caddy 對外發布連接埠，App 只信任 Caddy 的固定 IP。健康端點供內部檢查。API、Hub、健康回應及 ProblemDetails 使用 `no-store`，首頁使用 `no-cache`，帶內容雜湊的資產可長期快取。根目錄 Compose 供本機 PostgreSQL 驗證。 [自架指南](../deploy/README.md) · [分階段驗收](sprint-1-implementation-plan.md)
 
 第一階段以真 PostgreSQL 對正式 Migration 與正式 use case 驗證 Creator／Owner 複合 FK、EF 排序、deferred commit、cascade、同房併發及期限，不用 EF InMemory／SQLite 取代。列表驗證同交易快照、排序與滿房完整回傳；Client 驗證 dirty／generation／單一 round，無需事件重放測試框架。
 

@@ -165,7 +165,7 @@ S2 驗證另須直接覆蓋 Program.cs 的 DI 組裝、生命週期、預設／�
 
 ## 12. Deployment
 
-S7 完成後交付。代理與瀏覽器驗收可先使用隔離容器環境。新增元件及公開端點依 AGENTS.md 先提方案。
+已透過 [PR #13](https://github.com/ARueiz/Pasto/pull/13) 合併至 `main`。Docker Desktop、手機及 Linux Docker Engine 的驗收結果見 [測試紀錄](testing.md#deployment2026-11-22)。新增元件及公開端點依 AGENTS.md 先提方案。
 
 | 工作 | 交付與驗收 |
 | --- | --- |
@@ -206,5 +206,5 @@ S8 出口：需求 AC-01～AC-15 有可追溯證據。若未達 1,000 或時間�
 
 ## 15. 下一個實作任務與完成回報
 
-S6 主資料、房碼冷卻回收與 SignalR 連線清理已完成審查並提交至工作分支。Logging、Health Checks 與 OpenTelemetry 已在 `feature/observability` 驗證，後續依 [TODO.md](../TODO.md) 進入 S7。實際測試與失敗紀錄見 [testing.md](testing.md)。
+Deployment 已合併。下一個實作任務是 [S8 壓測與文件收尾](#13-s8負載證據驗收與文件收尾)。目前交付狀態見 [TODO.md](../TODO.md)，實際測試與失敗紀錄見 [測試紀錄](testing.md)。
 Phase 2 Object Storage／Metadata／檔案權限／可重試清理僅留在架構方向，不是本計畫交付，不建立 RoomFiles、IFileStorage 或檔案 API。

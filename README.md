@@ -27,7 +27,7 @@
 
 目前交付點與下一步見 [TODO.md](TODO.md)，整體規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
-部署規劃以自架 Docker Compose 為主，AWS 及外部監控為選配。目前根目錄 `compose.yaml` 供本機 PostgreSQL 整合測試。S7 防護完成前，部署環境須限可信任裝置與使用者存取。 [部署政策與取捨](docs/decisions/0004-observability-and-deployment.md)
+自架部署的 Docker Compose 設定位於 `deploy/`，根目錄的 `compose.yaml` 供本機 PostgreSQL 整合測試。AWS 及外部監控為選配，公開部署依既定政策執行。 [部署政策與取捨](docs/decisions/0004-observability-and-deployment.md)
 
 正式自架使用 Linux Docker Engine，Docker Desktop 供試用。Docker Desktop 的連接埠轉送可能讓不同用戶端被視為同一來源，影響每來源的限流額度。 [自架部署指南](deploy/README.md)
 

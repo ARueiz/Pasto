@@ -139,7 +139,7 @@ S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非�
 
 - S6 第二項非阻擋 P3：`6009 RoomConnectionTrackingFull` 目前隨清理 Worker 彙總。停用 Worker 時沒有摘要。後續確認是否需要與 Worker 狀態獨立的有界摘要，保留每期間最多一筆的日誌節流。
 
-- S7：交付並驗證全站 SignalR 連線配額、每個 Participant 3 條連線，以及正式反向代理的 token 遮蔽。S6 的 1,500 條上限只限制追蹤表記憶體，滿載仍可訂閱。正式反向代理另依 Deployment 計畫交付。
+- S7 已驗證全站 SignalR 連線配額及每個 Participant 3 條連線。S6 的 1,500 條上限只限制追蹤表記憶體，滿載仍可訂閱。正式反向代理的 token 遮蔽已在 Deployment 驗收。 [部署驗收紀錄](docs/testing.md#deployment2026-11-22)
 - 後續可評估作者代碼撞碼處理。目前接受五碼相同的作者在連續顯示時可能被分在同組。
 - S7／S8：同 NAT 共用失敗額度、跨房請求扣自身讀取額度。大量 /64 或在途併發仍可耗盡全站 DB 保護底線。查無快取與來源失敗桶已限量，既有框架 partition 的記憶體峰值與重連尖峰留待 S8 量測。 [第一批風險](docs/s2-api-identity.md#s7-第一批失敗計費)
 - S7-4：DB 底線、建房及 Join 的來源速率桶共 10,000，已驗證 negotiate 的來源表 5,000，滿載時表外來源走各自的全站桶。Participant 表上限 50,000 個 ID，滿載時新身分沿用適用的 DB 底線、每房配額與 in-flight，並記錄節流警告。
