@@ -21,6 +21,7 @@
 | S6 合併 | [PR #9](https://github.com/ARueiz/Pasto/pull/9) 已於 2026-11-21 合併至 `main@5ff602d`（Asia/Taipei） |
 | 可觀測性合併 | [PR #10](https://github.com/ARueiz/Pasto/pull/10) 已於 2026-11-21 合併至 `main@6200a96`（Asia/Taipei） |
 | S7 合併 | [PR #11](https://github.com/ARueiz/Pasto/pull/11) 已於 2026-11-21 合併至 `main@cd5b589`（Asia/Taipei） |
+| Deployment 合併 | [PR #13](https://github.com/ARueiz/Pasto/pull/13) 已合併至 `main@58c3c9f`，自架部署與每來源限流驗收完成 |
 
 開工前以 `git status` 確認工作目錄狀態，不覆蓋未提交的修改。不得自行推送或合併，除非使用者明確授權。
 
@@ -61,7 +62,7 @@
   - [x] S7-2 公開加入與猜碼防護。重犯退避、冷卻表滿載與同 NAT 30 人加入的修正已通過複核。
   - [x] S7-3 SignalR 常駐連線配額、negotiate 速率與 `SubscribeRoom` 限流。WebSocket 強制使用協商取得的 token，Origin 驗收與獨立複核通過。
   - [x] S7-4 HTTP 並行、過載 admission 與 partition 上限。慢速 I/O、同 NAT 30 人重試及 WebSocket 閒置驗收已通過。
-- [ ] Deployment：同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose。
+- [x] Deployment：同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose，已透過 PR #13 合併。
 - [ ] S8：壓測與收尾。
 - [ ] Seq／AWS：選配監控與 AWS 部署建議。
 
@@ -130,7 +131,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-Deployment 已在 `feature/deployment` 實作。Docker Desktop 與手機實機驗收已完成，Ubuntu 虛擬機上的原生 Docker Engine 也已通過來源 IP 與每來源限流重測。Deployment 待合併，下一階段是 S8 壓測與文件收尾。 [部署驗收紀錄](docs/testing.md#deployment2026-11-22) · [S8 實作計畫](docs/sprint-1-implementation-plan.md#13-s8負載證據驗收與文件收尾)
+Deployment 已透過 [PR #13](https://github.com/ARueiz/Pasto/pull/13) 合併至 `main`。下一階段是 S8 壓測與文件收尾，涵蓋 1,000 條連線、同一 NAT、熱房、大量重連與過期清理。 [部署驗收紀錄](docs/testing.md#deployment2026-11-22) · [S8 實作計畫](docs/sprint-1-implementation-plan.md#13-s8負載證據驗收與文件收尾)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 

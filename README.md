@@ -6,7 +6,7 @@
 
 ## 目前狀態
 
-**S1～S7 與可觀測性已合併至 `main`。** 房間支援跨裝置即時同步，重連或 Hub 暫時無法使用時由 REST 補讀。S7 已補上憑證與公開加入防護、SignalR 配額及 HTTP 過載保護。下一階段為 Deployment。
+**S1～S7、可觀測性與 Deployment 已合併至 `main`。** 房間支援跨裝置即時同步，重連或 Hub 暫時無法使用時由 REST 補讀。Pasto 可透過 Docker Compose 自架，由 Caddy 提供 HTTPS。下一階段為 S8 壓測與文件收尾。
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -23,6 +23,7 @@
 | S6 到期／關房清理與房碼回收 | 已由 [PR #9](https://github.com/ARueiz/Pasto/pull/9) 合併（`5ff602d`）。包含分批清理、房碼冷卻回收與 SignalR 連線清理。完整 PostgreSQL 回歸 307 例通過。 |
 | Logging、Health Checks、OpenTelemetry | 已由 [PR #10](https://github.com/ARueiz/Pasto/pull/10) 合併（`6200a96`）。包含結構化日誌、健康探針、選配 OTLP 與失敗計數。完整 PostgreSQL 回歸 321 例通過。 |
 | S7 安全與濫用防護 | 已由 [PR #11](https://github.com/ARueiz/Pasto/pull/11) 合併（`cd5b589`）。包含憑證查詢、公開 Join、SignalR、HTTP 並行及過載防護。完整 PostgreSQL 回歸 385 例通過，前端最近一次 Edge 回歸 44 例通過。見 [測試紀錄](docs/testing.md) |
+| Deployment 自架部署 | 已由 [PR #13](https://github.com/ARueiz/Pasto/pull/13) 合併（`58c3c9f`）。包含同源前端、Caddy TLS、雙層容器網路、獨立 Migration Job 與自架 Compose。完整 PostgreSQL 回歸 387 例通過，Linux 來源 IP 與每來源限流驗收通過。見 [自架指南](deploy/README.md) 與 [測試紀錄](docs/testing.md#deployment2026-11-22) |
 
 目前交付點與下一步見 [TODO.md](TODO.md)，整體規劃見 [Sprint 1 實作計畫](docs/sprint-1-implementation-plan.md)。
 
