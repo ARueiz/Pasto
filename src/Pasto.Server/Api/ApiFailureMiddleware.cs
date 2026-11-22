@@ -8,12 +8,16 @@ public sealed class ApiFailureMiddleware(RequestDelegate next, ILogger<ApiFailur
 {
     public async Task InvokeAsync(HttpContext context, IStorageFailureClassifier storageFailures)
     {
-        context.Response.Headers.CacheControl = "no-store";
-        context.Response.OnStarting(() =>
+        var path = context.Request.Path;
+        if (path.StartsWithSegments("/api") || path.StartsWithSegments("/hubs") || path.StartsWithSegments("/health"))
         {
             context.Response.Headers.CacheControl = "no-store";
-            return Task.CompletedTask;
-        });
+            context.Response.OnStarting(() =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                return Task.CompletedTask;
+            });
+        }
         try
         {
             await next(context);

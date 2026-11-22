@@ -7,3 +7,4 @@
 .env.*
 !.env.example
 /pasto-design/
+/deploy/certs/

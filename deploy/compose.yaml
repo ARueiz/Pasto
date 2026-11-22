@@ -1,0 +1,99 @@
+name: pasto-deploy
+
+x-logging: &logging
+  driver: ${PASTO_LOG_DRIVER:-local}
+  options:
+    max-size: 10m
+    max-file: "5"
+
+x-app-image: &app-image
+  image: ${PASTO_IMAGE:?Set PASTO_IMAGE}
+  pull_policy: never
+  logging: *logging
+
+services:
+  postgres:
+    image: postgres:18.6
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: pasto
+      POSTGRES_USER: pasto_admin
+      POSTGRES_PASSWORD: ${PASTO_DB_ADMIN_PASSWORD:?Set PASTO_DB_ADMIN_PASSWORD}
+      PASTO_MIGRATION_PASSWORD: ${PASTO_MIGRATION_PASSWORD:?Set PASTO_MIGRATION_PASSWORD}
+      PASTO_RUNTIME_PASSWORD: ${PASTO_RUNTIME_PASSWORD:?Set PASTO_RUNTIME_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/10-pasto.sql:ro
+    networks: [db]
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, pasto_admin, -d, pasto]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    <<: *app-image
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    entrypoint: [dotnet, Pasto.Server.dll, --migrate]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      Deployment__DatabaseHost: postgres
+      Deployment__DatabasePassword: ${PASTO_MIGRATION_PASSWORD:?Set PASTO_MIGRATION_PASSWORD}
+    networks: [db]
+
+  app:
+    <<: *app-image
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_HTTP_PORTS: ""
+      ASPNETCORE_URLS: http://${PASTO_APP_EDGE_IP:?Set PASTO_APP_EDGE_IP}:8080
+      Deployment__Enabled: "true"
+      Deployment__DatabaseHost: postgres
+      Deployment__DatabasePassword: ${PASTO_RUNTIME_PASSWORD:?Set PASTO_RUNTIME_PASSWORD}
+      Api__TrustedProxies__0: ${PASTO_CADDY_IP:?Set PASTO_CADDY_IP}
+    networks:
+      edge:
+        ipv4_address: ${PASTO_APP_EDGE_IP:?Set PASTO_APP_EDGE_IP}
+      db: {}
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PASTO_SITE_HOST: ${PASTO_SITE_HOST:?Set PASTO_SITE_HOST}
+      PASTO_TLS: ${PASTO_TLS:-internal}
+    ports:
+      - "${PASTO_BIND_ADDRESS:-0.0.0.0}:80:80"
+      - "${PASTO_BIND_ADDRESS:-0.0.0.0}:443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge:
+        ipv4_address: ${PASTO_CADDY_IP:?Set PASTO_CADDY_IP}
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${PASTO_EDGE_SUBNET:?Set PASTO_EDGE_SUBNET}
+  db:
+    internal: true
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

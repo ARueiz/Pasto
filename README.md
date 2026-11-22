@@ -28,6 +28,8 @@
 
 部署規劃以自架 Docker Compose 為主，AWS 及外部監控為選配。目前根目錄 `compose.yaml` 供本機 PostgreSQL 整合測試。S7 防護完成前，部署環境須限可信任裝置與使用者存取。 [部署政策與取捨](docs/decisions/0004-observability-and-deployment.md)
 
+正式自架使用 Linux Docker Engine，Docker Desktop 供試用。Docker Desktop 的連接埠轉送可能讓不同用戶端被視為同一來源，影響每來源的限流額度。 [自架部署指南](deploy/README.md)
+
 ## MVP 範圍
 
 - 匿名建房，不需註冊或登入；房間建立後固定 5 小時失效

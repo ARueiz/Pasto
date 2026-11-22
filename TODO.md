@@ -130,7 +130,7 @@ S3-02 審查方在 `a05d87f` 重跑相關 12 例及完整兩輪各 278 例，全
 
 ## 下一個工作
 
-S7 已合併。下一步是 Deployment，先處理同源靜態檔、TLS、可信代理、Migration Job 與自架 Compose，再進入 S8 壓測。 [ADR 0004](docs/decisions/0004-observability-and-deployment.md) · [Deployment 實作計畫](docs/sprint-1-implementation-plan.md#12-deployment)
+Deployment 已在 `feature/deployment` 實作，使用者已完成 Docker Desktop 與手機實機驗收。下一步是在 Linux Docker Engine 驗證真實來源 IP 與每來源限流，再進行 S8 的來源 IP 相關壓測。 [自架驗收步驟](deploy/README.md#驗收) · [Deployment 實作計畫](docs/sprint-1-implementation-plan.md#12-deployment)
 
 S3 已由 [PR #6](https://github.com/ARueiz/Pasto/pull/6) 合併。S3-01 的非阻擋 P3 修正保留在 `df2510d`。S3-02 的最壞回應大小估算和審查證據見 [測試紀錄](docs/testing.md)。
 
